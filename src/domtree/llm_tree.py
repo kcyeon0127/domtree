@@ -11,6 +11,7 @@ from typing import Optional
 from PIL import Image
 
 from .human_tree import HumanTreeOptions, HumanTreeExtractor
+from .schema import NodeMetadata
 from .tree import TreeNode
 
 logger = logging.getLogger(__name__)
@@ -58,9 +59,8 @@ class HeuristicLLMTreeGenerator(LLMTreeGenerator):
         visual_profile = self._analyze_screenshot(request.screenshot_path)
         logger.debug("Computed visual profile: %s", visual_profile)
         simplified = self._simplify_tree(human_tree, visual_profile)
-        simplified.metadata.setdefault("llm_notes", {})
-        simplified.metadata["llm_notes"]["generator"] = "heuristic"
-        simplified.metadata["llm_notes"]["visual_profile"] = visual_profile
+        simplified.metadata.notes.setdefault("llm", {})
+        simplified.metadata.notes["llm"].update({"generator": "heuristic", "visual_profile": visual_profile})
         return simplified
 
     def _analyze_screenshot(self, path: Path) -> dict:
@@ -98,10 +98,11 @@ class HeuristicLLMTreeGenerator(LLMTreeGenerator):
             return children[:max_children]
 
         def recurse(node: TreeNode, depth: int = 0) -> TreeNode:
+            metadata = node.metadata.copy()
             new_node = TreeNode(
                 name=node.name,
                 label=node.label,
-                metadata={**node.metadata},
+                metadata=metadata,
             )
             if depth >= max_depth:
                 return new_node
@@ -110,7 +111,8 @@ class HeuristicLLMTreeGenerator(LLMTreeGenerator):
                 new_node.add_child(recurse(child, depth + 1))
             # Inject an artificial confidence score influenced by brightness and depth
             confidence = max(0.1, min(0.95, brightness - depth * 0.05 + len(limited_children) * 0.02))
-            new_node.metadata["llm_confidence"] = round(confidence, 3)
+            new_node.metadata.notes.setdefault("llm", {})
+            new_node.metadata.notes["llm"]["confidence"] = round(confidence, 3)
             return new_node
 
         return recurse(human_tree)

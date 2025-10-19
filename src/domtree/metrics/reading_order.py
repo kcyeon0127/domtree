@@ -28,7 +28,7 @@ def _reading_sequence(node: TreeNode) -> List[str]:
     sequence: List[str] = []
 
     def _dfs(current: TreeNode) -> None:
-        label = current.metadata.get("text_preview") or current.label or current.name
+        label = current.metadata.text_preview or current.label or current.name
         if label:
             sequence.append(str(label))
         for child in current.children:

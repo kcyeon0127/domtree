@@ -1,0 +1,37 @@
+# ===== Python 기본 =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ===== 가상환경 =====
+.env/
+.venv/
+venv/
+ENV/
+env/
+.ipynb_checkpoints/
+
+# ===== 빌드 & 배포 =====
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ===== IDE 설정 =====
+.vscode/
+.idea/
+*.swp
+
+# ===== 데이터 & 결과 =====
+data/
+output/
+screenshots/
+
+# ===== 로그 & 캐시 =====
+*.log
+*.tmp
+*.bak
+*.DS_Store
+.cache/

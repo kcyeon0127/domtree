@@ -26,7 +26,7 @@ _CAPTURE_SETTINGS = {
 }
 
 _HUMAN_SETTINGS = {
-    "min_text_length": 25,
+    "min_text_length": 20,
 }
 
 _LLM_SETTINGS = {

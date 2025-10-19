@@ -8,6 +8,8 @@ import uuid
 from collections import deque
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from .schema import NodeMetadata
+
 
 @dataclasses.dataclass
 class TreeNode:
@@ -17,7 +19,7 @@ class TreeNode:
     label: Optional[str] = None
     children: List["TreeNode"] = dataclasses.field(default_factory=list)
     attributes: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    metadata: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    metadata: NodeMetadata = dataclasses.field(default_factory=lambda: NodeMetadata(node_type="generic"))
     identifier: str = dataclasses.field(default_factory=lambda: uuid.uuid4().hex)
 
     def add_child(self, child: "TreeNode") -> None:
@@ -40,18 +42,20 @@ class TreeNode:
             "name": self.name,
             "label": self.label,
             "attributes": self.attributes,
-            "metadata": self.metadata,
+            "metadata": self.metadata.to_dict(),
             "identifier": self.identifier,
             "children": [child.to_dict() for child in self.children],
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TreeNode":
+        metadata = data.get("metadata")
+        meta = NodeMetadata.from_dict(metadata) if isinstance(metadata, dict) else NodeMetadata(node_type="generic")
         node = cls(
             name=data["name"],
             label=data.get("label"),
             attributes=data.get("attributes", {}),
-            metadata=data.get("metadata", {}),
+            metadata=meta,
             identifier=data.get("identifier", uuid.uuid4().hex),
         )
         for child in data.get("children", []):
@@ -66,7 +70,7 @@ class TreeNode:
         label = f" ({self.label})" if self.label else ""
         meta = ""
         if self.metadata:
-            meta = " " + json.dumps(self.metadata, ensure_ascii=False)
+            meta = " " + json.dumps(self.metadata.to_dict(), ensure_ascii=False)
         line = f"{prefix}- {self.name}{label}{meta}\n"
         for child in self.children:
             line += child.pretty_print(indent=indent, level=level + 1)

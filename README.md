@@ -4,7 +4,7 @@
 
 ## 주요 기능
 - Playwright 기반 자동 캡처: 쿠키 동의 팝업 닫기, JavaScript 렌더링 대기, 전체 페이지 스크롤 캡처 지원
-- Human Tree 추출: 헤딩·시맨틱 태그·텍스트 밀도·레이아웃 키워드를 활용한 휴먼 퍼셉션 트리 구성
+- Human Tree 추출: 시각 Zone과 Heading 계층을 중첩한 휴먼 퍼셉션 트리 (읽기 순서, 역할, 시각 단서 포함)
 - LLM Tree 생성: 스크린샷 시각 특징(밝기, 주요 색상 등)과 추상화 파라미터를 반영한 휴리스틱 LLM 트리 제공 (실제 LLM 연동도 가능)
 - 평가 지표: 트리 편집 거리(TED), 계층 F1, 구조적 유사도, 읽기 순서 정렬(Needleman-Wunsch), 불일치 패턴 분류
 - 배치/리포트: URL 목록 일괄 처리, 요약 통계, CSV/JSON 결과물, 트리 시각화 이미지 출력
@@ -22,6 +22,8 @@ playwright install chromium
 ### 단일 URL 분석
 ```bash
 domtree analyze https://example.com
+
+domtree analyze https://ko.wikipedia.org/wiki/%ED%8C%8C%EC%9D%B4%EC%8D%AC
 ```
 - 캡처 이미지와 렌더링된 HTML이 `data/screenshots/`에 저장됩니다.
 - 분석 결과, 메트릭 요약, 트리 시각화는 `data/output/single/<슬러그>/<타임스탬프>/` 하위에 저장됩니다.
@@ -45,20 +47,93 @@ domtree batch urls.txt
 
 ## 구성 요소
 - `domtree.capture`: Playwright 캡처 옵션과 전체 페이지 스크린샷/HTML 저장 로직
-- `domtree.human_tree`: DOM 기반 휴먼 트리 추출 휴리스틱
+- `domtree.human_tree`: **Zone(시각 영역) ⊃ Heading(논리 계층)** 중첩 트리를 생성하는 휴먼 퍼셉션 추출기
 - `domtree.llm_tree`: 휴리스틱 LLM 트리 생성기와 추상화 파라미터, 향후 실제 LLM 연동용 인터페이스
 - `domtree.metrics`: TED, 계층 F1, 구조적 유사도, 읽기 순서 정렬, 불일치 패턴 분류 등 핵심 메트릭
 - `domtree.pipeline`: 전체 파이프라인 오케스트레이션, 배치 처리, 시각화, 요약 통계
 - `domtree.visualization`: 네트워크 그래프 기반 트리/비교 시각화
 - `domtree.cli`: Typer CLI 커맨드 (`analyze`, `analyze-offline`, `batch`)
 
+### 사람 인식 트리 스키마
+`HumanTreeExtractor`는 Zone Tree와 Heading Tree를 중첩한 구조를 생성합니다. 각 노드는 `metadata`에 다음과 같은 공통 필드를 유지합니다.
+
+| 필드 | 설명 |
+| --- | --- |
+| `type` | `page`, `zone`, `section`, `paragraph`, `list`, `table`, `figure` 등 노드 유형 |
+| `role` | `main`, `sidebar`, `nav`, `toc`, `ad`, `body` 등 시각 영역 역할 |
+| `text_heading`/`heading_level` | 헤딩 텍스트와 등급(H1~H6) |
+| `reading_order` | 사람이 읽는 순서를 기준으로 한 순번 (좌→우, 상→하 원칙) |
+| `dom_refs` | DOM 요소를 추적하기 위한 CSS 선택자(`#id`, `.class` 등) |
+| `vis_cues` | 인라인 스타일 기반 시각 단서(`font_size`, `font_weight`, `margin_top` 등) |
+| `text_preview` | 본문/리스트 항목 등 텍스트 블록의 미리보기 |
+
+예시(JSON):
+
+```json
+{
+  "name": "zone",
+  "label": "Main",
+  "metadata": {
+    "type": "zone",
+    "role": "main",
+    "reading_order": 1,
+    "dom_refs": ["main.content"],
+    "text_heading": "문서 제목"
+  },
+  "children": [
+    {
+      "name": "section",
+      "label": "소개",
+      "metadata": {
+        "type": "section",
+        "heading_level": 2,
+        "text_heading": "소개",
+        "reading_order": 2
+      },
+      "children": [
+        {
+          "name": "paragraph",
+          "label": "소개 본문 미리보기",
+          "metadata": {
+            "type": "paragraph",
+            "text_preview": "...",
+            "reading_order": 3
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+## 워크플로 개요
+1. **Capture**: Playwright가 렌더링 완료까지 대기한 뒤 전체 페이지를 스크롤·캡처하고 HTML을 저장합니다.
+2. **Human Tree 추출**: 페이지를 Zone 단위로 나누고, 각 Zone 내부에서 Heading/본문 계층을 구성하여 `reading_order`, `dom_refs`, `vis_cues` 등을 부여합니다.
+3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현해 교체할 수 있습니다.
+4. **비교 및 평가**: 트리 간 차이를 TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 정량화합니다.
+5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(트리/비교 시각화)를 기록합니다.
+
+## LLM 비교 및 평가 지표
+- **Tree Edit Distance / Normalized TED**: 계층 구조 차이를 비용 관점에서 정량화합니다.
+- **Hierarchical Precision/Recall/F1**: 루트부터 노드까지의 경로가 일치하는 정도로 계층 정확도를 평가합니다.
+- **Structural Similarity**: 노드 수, 깊이, branching factor, 라벨 분포를 비교합니다.
+- **Reading Order Alignment**: Needleman–Wunsch 정렬로 읽기 순서 일치도를 계산합니다.
+- **Mismatch Pattern Report**: 누락/추가 노드, 깊이 이동, 읽기 순서 공백 등 오차 유형을 요약합니다.
+
+시각화 모듈은 시스템에 설치된 한글 지원 폰트(예: AppleGothic, NanumGothic)를 자동으로 사용합니다. 필요 시 `src/domtree/visualization/tree_plot.py`의 `_FONT_CANDIDATES` 목록을 원하는 폰트 이름으로 수정하세요. 폰트가 없다면 다음 명령으로 설치할 수 있습니다.
+
+- macOS(Homebrew): `brew install --cask nanumfont` 또는 `brew install --cask noto-sans-cjk-kr`
+- Ubuntu/Debian: `sudo apt install fonts-nanum fonts-noto-cjk`
+- Conda 환경: `conda install -c conda-forge noto-fonts-cjk` (macOS arm64에서는 일부 폰트 패키지가 제공되지 않을 수 있습니다)
+- 번들 사용: `src/assets/fonts/`에 `NanumGothic-Regular.ttf`를 추가하면 시각화 시 자동으로 적용됩니다(폴더가 없다면 생성 후 폰트와 라이선스 파일을 넣어 주세요)
+
 ### CLI 기본 하이퍼파라미터 조정
-터미널 실행 시에는 내부 기본값을 사용하며, 아래 상수를 수정해 하이퍼파라미터를 조절할 수 있습니다. (`--wait-after-load`와 같은 커맨드라인 옵션은 제공하지 않습니다.)
+터미널 실행 시에는 내부 기본값을 사용하며, 아래 상수를 수정해 하이퍼파라미터를 조절할 수 있습니다.
 
 | 설정 사전 | 기본 키/값 | 설명 |
 | --- | --- | --- |
 | `_CAPTURE_SETTINGS` | `wait_after_load=1.0`, `max_scroll_steps=40` | 렌더링 대기 시간, 자동 스크롤 수행 횟수 |
-| `_HUMAN_SETTINGS` | `min_text_length=25` | Human Tree에 포함할 최소 텍스트 길이 |
+| `_HUMAN_SETTINGS` | `min_text_length=20` | Human Tree에 포함할 최소 텍스트 길이 |
 | `_LLM_SETTINGS` | `max_depth=4`, `max_children=6` | 휴리스틱 LLM Tree의 최대 깊이/자식 수 |
 
 필요한 값을 `src/domtree/cli.py`에서 직접 수정한 뒤 CLI를 실행하면 변경사항이 즉시 적용됩니다.

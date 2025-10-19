@@ -6,9 +6,46 @@ from pathlib import Path
 from typing import Tuple
 
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as font_manager
 import networkx as nx
 
 from ..tree import TreeNode
+
+
+ASSET_FONT_PATH = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "NanumGothic-Regular.ttf"
+ASSET_FONT_NAME = None
+if ASSET_FONT_PATH.exists():
+    font_manager.fontManager.addfont(str(ASSET_FONT_PATH))
+    ASSET_FONT_NAME = font_manager.FontProperties(fname=str(ASSET_FONT_PATH)).get_name()
+
+
+_FONT_CANDIDATES = [name for name in ([ASSET_FONT_NAME] if ASSET_FONT_NAME else [])]
+_FONT_CANDIDATES += [
+    "NanumGothic",
+    "AppleGothic",
+    "Malgun Gothic",
+    "Arial Unicode MS",
+    "Noto Sans CJK KR",
+    "PingFang HK",
+    "PingFang SC",
+    "PingFang TC",
+    "DejaVu Sans",
+]
+
+
+def _configure_font() -> None:
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    for family in _FONT_CANDIDATES:
+        if family and family in available:
+            plt.rcParams["font.family"] = [family]
+            plt.rcParams["font.sans-serif"] = [family]
+            break
+    else:
+        plt.rcParams.setdefault("font.family", ["DejaVu Sans"])
+    plt.rcParams.setdefault("axes.unicode_minus", False)
+
+
+_configure_font()
 
 
 def _build_graph(node: TreeNode) -> nx.DiGraph:
@@ -51,7 +88,10 @@ def plot_tree(tree: TreeNode, *, title: str = "Tree", figsize: Tuple[int, int] =
     fig, ax = plt.subplots(figsize=figsize)
     nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#90caf9", ax=ax)
     nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
-    nx.draw_networkx_labels(graph, pos, labels, font_size=8, ax=ax)
+    label_kwargs = {"font_size": 8, "ax": ax}
+    if ASSET_FONT_NAME is not None:
+        label_kwargs["font_family"] = ASSET_FONT_NAME
+    nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
     ax.set_title(title)
     ax.axis("off")
     if path:
@@ -77,7 +117,10 @@ def plot_side_by_side(human_tree: TreeNode, llm_tree: TreeNode, *, path: Path | 
         labels = nx.get_node_attributes(graph, "label")
         nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#a5d6a7", ax=ax)
         nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
-        nx.draw_networkx_labels(graph, pos, labels, font_size=8, ax=ax)
+        label_kwargs = {"font_size": 8, "ax": ax}
+        if ASSET_FONT_NAME is not None:
+            label_kwargs["font_family"] = ASSET_FONT_NAME
+        nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
         ax.set_title(title)
         ax.axis("off")
     if path:

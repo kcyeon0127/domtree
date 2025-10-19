@@ -11,7 +11,8 @@ from ..tree import TreeNode, tree_size
 
 def _node_label(node: TreeNode, *, use_label: bool = True) -> str:
     candidate = (node.label or "") if use_label else ""
-    return candidate or node.metadata.get("heading_text") or node.name
+    heading = node.metadata.text_heading if hasattr(node.metadata, "text_heading") else None
+    return candidate or heading or node.name
 
 
 def _tree_to_zss(node: TreeNode, *, use_label: bool = True) -> Node:
@@ -63,16 +64,7 @@ def tree_edit_distance(
         )
     except TypeError:
         # Older versions of zss expose a simpler signature (no custom costs).
-        def _label_dist(znode_a: Node, znode_b: Node) -> float:
-            return relabel_cost(znode_a.original, znode_b.original)
-
-        return simple_distance(
-            ref,
-            cand,
-            get_children=_get_children,
-            get_label=lambda node: getattr(node, "label", ""),
-            label_dist=_label_dist,
-        )
+        return simple_distance(ref, cand, get_children=_get_children)
 
 
 def normalized_tree_edit_distance(reference: TreeNode, candidate: TreeNode, **kwargs) -> float:
