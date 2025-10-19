@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: domtree
+Version: 0.1.0
+Summary: Structural difference analysis between human-perceived and LLM-derived DOM trees
+Author: DomTree Team
+Requires-Python: >=3.9
+Requires-Dist: beautifulsoup4
+Requires-Dist: lxml
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: playwright
+Requires-Dist: pillow
+Requires-Dist: zss
+Requires-Dist: networkx
+Requires-Dist: scipy
+Requires-Dist: matplotlib
+Requires-Dist: typer[all]
+Requires-Dist: tqdm
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: ruff; extra == "dev"

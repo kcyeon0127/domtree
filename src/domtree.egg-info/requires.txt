@@ -1,0 +1,17 @@
+beautifulsoup4
+lxml
+numpy
+pandas
+playwright
+pillow
+zss
+networkx
+scipy
+matplotlib
+typer[all]
+tqdm
+
+[dev]
+pytest
+pytest-cov
+ruff
