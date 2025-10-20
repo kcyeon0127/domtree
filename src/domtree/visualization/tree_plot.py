@@ -12,40 +12,54 @@ import networkx as nx
 from ..tree import TreeNode
 
 
-ASSET_FONT_PATH = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "NanumGothic-Regular.ttf"
-ASSET_FONT_NAME = None
-if ASSET_FONT_PATH.exists():
-    font_manager.fontManager.addfont(str(ASSET_FONT_PATH))
-    ASSET_FONT_NAME = font_manager.FontProperties(fname=str(ASSET_FONT_PATH)).get_name()
+ASSET_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+FONT_EXTENSIONS = {".ttf", ".otf", ".ttc"}
+ADDED_FONT_NAMES: list[str] = []
+if ASSET_FONT_DIR.exists():
+    for font_path in ASSET_FONT_DIR.rglob("*"):
+        if font_path.is_file() and font_path.suffix.lower() in FONT_EXTENSIONS:
+            try:
+                font_manager.fontManager.addfont(str(font_path))
+                name = font_manager.FontProperties(fname=str(font_path)).get_name()
+                if name not in ADDED_FONT_NAMES:
+                    ADDED_FONT_NAMES.append(name)
+            except Exception:
+                continue
 
 
-_FONT_CANDIDATES = [name for name in ([ASSET_FONT_NAME] if ASSET_FONT_NAME else [])]
-_FONT_CANDIDATES += [
-    "NanumGothic",
+_FONT_CANDIDATES = [
+    "Noto Sans CJK KR",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK SC",
+    "Arial Unicode MS",
+    "Nanum Gothic",
     "AppleGothic",
     "Malgun Gothic",
-    "Arial Unicode MS",
-    "Noto Sans CJK KR",
     "PingFang HK",
     "PingFang SC",
     "PingFang TC",
     "DejaVu Sans",
 ]
+for name in reversed(ADDED_FONT_NAMES):
+    if name not in _FONT_CANDIDATES:
+        _FONT_CANDIDATES.insert(0, name)
 
 
-def _configure_font() -> None:
+def _configure_font() -> list[str]:
     available = {font.name for font in font_manager.fontManager.ttflist}
+    font_stack: list[str] = []
     for family in _FONT_CANDIDATES:
-        if family and family in available:
-            plt.rcParams["font.family"] = [family]
-            plt.rcParams["font.sans-serif"] = [family]
-            break
-    else:
-        plt.rcParams.setdefault("font.family", ["DejaVu Sans"])
+        if family and family in available and family not in font_stack:
+            font_stack.append(family)
+    if not font_stack:
+        font_stack = ["DejaVu Sans"]
+    plt.rcParams["font.family"] = font_stack
+    plt.rcParams["font.sans-serif"] = font_stack
     plt.rcParams.setdefault("axes.unicode_minus", False)
+    return font_stack
 
 
-_configure_font()
+_FONT_STACK = _configure_font()
 
 
 def _build_graph(node: TreeNode) -> nx.DiGraph:
@@ -59,6 +73,24 @@ def _build_graph(node: TreeNode) -> nx.DiGraph:
 
     _add(node)
     return graph
+
+
+def _sanitize_label(text: str | None) -> str:
+    if not text:
+        return ""
+    allowed = []
+    for char in text:
+        code = ord(char)
+        if 32 <= code <= 126:
+            allowed.append(char)
+        elif 0x1100 <= code <= 0x11FF:  # Hangul Jamo
+            allowed.append(char)
+        elif 0x3130 <= code <= 0x318F:  # Hangul compatibility jamo
+            allowed.append(char)
+        elif 0xAC00 <= code <= 0xD7A3:  # Hangul syllables
+            allowed.append(char)
+    sanitized = "".join(allowed).strip()
+    return sanitized or "…"
 
 
 def _hierarchy_positions(graph: nx.DiGraph, root: str, width: float = 1.0, vert_gap: float = 0.2, vert_loc: float = 0.0) -> dict:
@@ -83,14 +115,15 @@ def _hierarchy_positions(graph: nx.DiGraph, root: str, width: float = 1.0, vert_
 def plot_tree(tree: TreeNode, *, title: str = "Tree", figsize: Tuple[int, int] = (8, 6), path: Path | None = None) -> None:
     graph = _build_graph(tree)
     pos = _hierarchy_positions(graph, tree.identifier)
-    labels = nx.get_node_attributes(graph, "label")
+    raw_labels = nx.get_node_attributes(graph, "label")
+    labels = {node_id: _sanitize_label(label) for node_id, label in raw_labels.items()}
 
     fig, ax = plt.subplots(figsize=figsize)
     nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#90caf9", ax=ax)
     nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
     label_kwargs = {"font_size": 8, "ax": ax}
-    if ASSET_FONT_NAME is not None:
-        label_kwargs["font_family"] = ASSET_FONT_NAME
+    if _FONT_STACK:
+        label_kwargs["font_family"] = _FONT_STACK
     nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
     ax.set_title(title)
     ax.axis("off")
@@ -114,12 +147,13 @@ def plot_side_by_side(human_tree: TreeNode, llm_tree: TreeNode, *, path: Path | 
         (pos_left, pos_right),
         ("Human Tree", "LLM Tree"),
     ):
-        labels = nx.get_node_attributes(graph, "label")
+        raw_labels = nx.get_node_attributes(graph, "label")
+        labels = {node_id: _sanitize_label(label) for node_id, label in raw_labels.items()}
         nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#a5d6a7", ax=ax)
         nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
         label_kwargs = {"font_size": 8, "ax": ax}
-        if ASSET_FONT_NAME is not None:
-            label_kwargs["font_family"] = ASSET_FONT_NAME
+        if _FONT_STACK:
+            label_kwargs["font_family"] = _FONT_STACK
         nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
         ax.set_title(title)
         ax.axis("off")

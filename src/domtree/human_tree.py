@@ -54,6 +54,7 @@ class HumanTreeOptions:
     include_lists: bool = True
     include_tables: bool = True
     include_figures: bool = True
+    restrict_to_viewport: bool = True
 
 
 class HumanTreeExtractor:
@@ -66,6 +67,8 @@ class HumanTreeExtractor:
         self.soup = self._prepare_soup(html)
         self._reading_counter = 1
         self._processed: set[int] = set()
+        self.viewport_width: Optional[float] = None
+        self.viewport_height: Optional[float] = None
 
     def extract(self) -> TreeNode:
         body = self.soup.body or self.soup
@@ -100,6 +103,8 @@ class HumanTreeExtractor:
                 continue
             if not self._is_visible(candidate):
                 continue
+            if self.options.restrict_to_viewport and not self._element_in_viewport(candidate):
+                continue
             zones.append(candidate)
         if not zones:
             zones = primary
@@ -118,6 +123,8 @@ class HumanTreeExtractor:
             visual_cues=self._visual_cues(element),
         )
         label = heading_text or role or element.name
+        if self.options.restrict_to_viewport and not self._bbox_in_viewport(metadata.visual_cues.bbox):
+            return None
         zone_node = TreeNode(name="zone", label=label, metadata=metadata)
         self._processed.add(id(element))
 
@@ -163,6 +170,8 @@ class HumanTreeExtractor:
                 stack.pop()
             parent_node = stack[-1][1] if stack else zone_node
             section_node = self._create_section_node(heading, level)
+            if section_node is None:
+                continue
             parent_node.add_child(section_node)
             stack.append((level, section_node))
             created_nodes.append(section_node)
@@ -183,6 +192,8 @@ class HumanTreeExtractor:
             dom_refs=[self._dom_ref(heading)],
             visual_cues=self._visual_cues(heading),
         )
+        if self.options.restrict_to_viewport and not self._bbox_in_viewport(metadata.visual_cues.bbox):
+            return None
         node = TreeNode(name="section", label=metadata.text_heading or f"H{level}", metadata=metadata)
         return node
 
@@ -243,6 +254,8 @@ class HumanTreeExtractor:
             visual_cues=self._visual_cues(element),
             text_preview=text_preview,
         )
+        if self.options.restrict_to_viewport and not self._bbox_in_viewport(metadata.visual_cues.bbox):
+            return None
         label = text_preview or element.name
         node = TreeNode(name=node_type, label=label, metadata=metadata)
         self._processed.add(id(element))
@@ -258,6 +271,8 @@ class HumanTreeExtractor:
                     text_preview=li_text,
                     visual_cues=self._visual_cues(li),
                 )
+                if self.options.restrict_to_viewport and not self._bbox_in_viewport(li_meta.visual_cues.bbox):
+                    continue
                 node.add_child(TreeNode(name="list_item", label=li_text or "item", metadata=li_meta))
                 self._processed.add(id(li))
         return node
@@ -284,7 +299,23 @@ class HumanTreeExtractor:
         soup = BeautifulSoup(html, "lxml")
         for tag in soup.find_all(SKIP_TAGS):
             tag.decompose()
+        self._extract_viewport_meta(soup)
         return soup
+
+    def _extract_viewport_meta(self, soup: BeautifulSoup) -> None:
+        body = soup.body
+        if not body:
+            return
+        attr = body.get("data-domtree-viewport")
+        if not attr:
+            return
+        try:
+            width_str, height_str = attr.split(",")
+            self.viewport_width = float(width_str)
+            self.viewport_height = float(height_str)
+        except (ValueError, TypeError):
+            self.viewport_width = None
+            self.viewport_height = None
 
     def _is_visible(self, element: Tag) -> bool:
         classes = element.get("class", [])
@@ -324,13 +355,37 @@ class HumanTreeExtractor:
         margin_top = self._parse_css_size(parsed.get("margin-top"))
         margin_bottom = self._parse_css_size(parsed.get("margin-bottom"))
         bg_color = parsed.get("background") or parsed.get("background-color")
+        bbox = self._extract_bbox(element)
         return VisualCues(
             font_size=font_size,
             font_weight=font_weight,
             margin_top=margin_top,
             margin_bottom=margin_bottom,
             bg_color=bg_color,
+            bbox=bbox,
         )
+
+    def _extract_bbox(self, element: Tag) -> Optional[Tuple[float, float, float, float]]:
+        attr = element.get("data-domtree-bbox")
+        if not attr:
+            return None
+        try:
+            top, left, bottom, right = (float(value) for value in attr.split(","))
+            return (top, left, bottom, right)
+        except (ValueError, TypeError):
+            return None
+
+    def _bbox_in_viewport(self, bbox: Optional[Tuple[float, float, float, float]]) -> bool:
+        if not self.options.restrict_to_viewport:
+            return True
+        if bbox is None or self.viewport_height is None:
+            return True
+        top, _, bottom, _ = bbox
+        return bottom > 0 and top < self.viewport_height
+
+    def _element_in_viewport(self, element: Tag) -> bool:
+        bbox = self._extract_bbox(element)
+        return self._bbox_in_viewport(bbox)
 
     def _parse_styles(self, style: str) -> dict:
         result = {}

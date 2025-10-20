@@ -5,6 +5,7 @@
 ## 주요 기능
 - Playwright 기반 자동 캡처: 쿠키 동의 팝업 닫기, JavaScript 렌더링 대기, 전체 페이지 스크롤 캡처 지원
 - Human Tree 추출: 시각 Zone과 Heading 계층을 중첩한 휴먼 퍼셉션 트리 (읽기 순서, 역할, 시각 단서 포함)
+- **뷰포트 필터링**: 스크린샷에 실제로 보이는 영역(초기 뷰포트)과 겹치는 요소만 트리에 포함하여 사람의 즉시 인식 범위에 집중
 - LLM Tree 생성: 스크린샷 시각 특징(밝기, 주요 색상 등)과 추상화 파라미터를 반영한 휴리스틱 LLM 트리 제공 (실제 LLM 연동도 가능)
 - 평가 지표: 트리 편집 거리(TED), 계층 F1, 구조적 유사도, 읽기 순서 정렬(Needleman-Wunsch), 불일치 패턴 분류
 - 배치/리포트: URL 목록 일괄 처리, 요약 통계, CSV/JSON 결과물, 트리 시각화 이미지 출력
@@ -66,6 +67,7 @@ domtree batch urls.txt
 | `dom_refs` | DOM 요소를 추적하기 위한 CSS 선택자(`#id`, `.class` 등) |
 | `vis_cues` | 인라인 스타일 기반 시각 단서(`font_size`, `font_weight`, `margin_top` 등) |
 | `text_preview` | 본문/리스트 항목 등 텍스트 블록의 미리보기 |
+| `notes` | 휴리스틱·LLM 정보 등 추가 메모 (예: `notes.llm.confidence`) |
 
 예시(JSON):
 
@@ -106,12 +108,14 @@ domtree batch urls.txt
 }
 ```
 
-## 워크플로 개요
-1. **Capture**: Playwright가 렌더링 완료까지 대기한 뒤 전체 페이지를 스크롤·캡처하고 HTML을 저장합니다.
-2. **Human Tree 추출**: 페이지를 Zone 단위로 나누고, 각 Zone 내부에서 Heading/본문 계층을 구성하여 `reading_order`, `dom_refs`, `vis_cues` 등을 부여합니다.
-3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현해 교체할 수 있습니다.
-4. **비교 및 평가**: 트리 간 차이를 TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 정량화합니다.
-5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(트리/비교 시각화)를 기록합니다.
+> 기본 동작은 스크린샷 뷰포트에 실제로 렌더링된 요소만 유지합니다. Playwright 캡처 단계에서 모든 노드에 `data-domtree-bbox`(bounding box)와 `data-domtree-viewport`(뷰포트 크기) 속성을 주입하고, `HumanTreeExtractor`가 이를 사용해 뷰포트와 겹치지 않는 노드를 제외합니다. 필요하면 `HumanTreeOptions(restrict_to_viewport=False)`로 전체 DOM을 분석하도록 변경할 수 있습니다.
+
+## Human Tree/Human vs LLM 워크플로
+1. **Capture**: Playwright가 렌더링 완료까지 대기한 뒤 전체 페이지를 스크롤·캡처하고 HTML을 저장합니다. 이때 모든 DOM 요소에 `data-domtree-bbox`/`data-domtree-viewport` 속성을 주입해 뷰포트 좌표를 기록합니다.
+2. **Human Tree 추출**: Zone(시맨틱 컨테이너) → Heading → 콘텐츠 블록 순으로 계층을 구축하고, `reading_order`, `dom_refs`, `vis_cues`(bbox 포함) 등 메타데이터를 채웁니다. 기본 설정(`restrict_to_viewport=True`)은 스크린샷에 실제 보인 부분만 유지합니다.
+3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현하거나 파라미터를 조정해 자유롭게 구성할 수 있습니다.
+4. **비교 및 평가**: TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 두 트리의 차이를 정량화합니다.
+5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_tree.json`/`llm_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다.
 
 ## LLM 비교 및 평가 지표
 - **Tree Edit Distance / Normalized TED**: 계층 구조 차이를 비용 관점에서 정량화합니다.
@@ -120,12 +124,13 @@ domtree batch urls.txt
 - **Reading Order Alignment**: Needleman–Wunsch 정렬로 읽기 순서 일치도를 계산합니다.
 - **Mismatch Pattern Report**: 누락/추가 노드, 깊이 이동, 읽기 순서 공백 등 오차 유형을 요약합니다.
 
-시각화 모듈은 시스템에 설치된 한글 지원 폰트(예: AppleGothic, NanumGothic)를 자동으로 사용합니다. 필요 시 `src/domtree/visualization/tree_plot.py`의 `_FONT_CANDIDATES` 목록을 원하는 폰트 이름으로 수정하세요. 폰트가 없다면 다음 명령으로 설치할 수 있습니다.
+시각화 모듈은 `_FONT_CANDIDATES` 순서대로 사용 가능한 폰트를 탐색하여 `font.family` 스택을 구성하므로, 앞쪽에 있는 범용 폰트(Noto Sans CJK, Arial Unicode 등)가 설치되어 있으면 한글/한자/라틴 혼용 텍스트도 자동으로 커버됩니다. 필요 시 `src/domtree/visualization/tree_plot.py`의 목록(예: `"Nanum Gothic"` → 시스템에 따라 이름이 다를 수 있음)을 조정하거나, 아래 명령으로 폰트를 설치하세요.
 
 - macOS(Homebrew): `brew install --cask nanumfont` 또는 `brew install --cask noto-sans-cjk-kr`
 - Ubuntu/Debian: `sudo apt install fonts-nanum fonts-noto-cjk`
 - Conda 환경: `conda install -c conda-forge noto-fonts-cjk` (macOS arm64에서는 일부 폰트 패키지가 제공되지 않을 수 있습니다)
-- 번들 사용: `src/assets/fonts/`에 `NanumGothic-Regular.ttf`를 추가하면 시각화 시 자동으로 적용됩니다(폴더가 없다면 생성 후 폰트와 라이선스 파일을 넣어 주세요)
+- 번들 사용: `src/assets/fonts/`에 원하는 `.ttf/.otf/.ttc` 파일을 넣으면 앱이 자동으로 모두 로드합니다. 예: `Nanum Gothic`, `Noto Sans CJK`, `Noto Sans Sinhala` 등을 넣어두면 서버 환경에서도 동일한 폰트 스택이 적용됩니다. 추가 폰트를 넣었다면 라이선스 파일도 함께 보관하세요.
+- 시각화 PNG에서는 가독성을 위해 지원되지 않는 문자(폰트에 없는 스크립트)는 자동으로 제거/생략됩니다. 원본 텍스트는 `human_tree.json`/`llm_tree.json` 메타데이터에 그대로 남습니다.
 
 ### CLI 기본 하이퍼파라미터 조정
 터미널 실행 시에는 내부 기본값을 사용하며, 아래 상수를 수정해 하이퍼파라미터를 조절할 수 있습니다.
@@ -133,7 +138,7 @@ domtree batch urls.txt
 | 설정 사전 | 기본 키/값 | 설명 |
 | --- | --- | --- |
 | `_CAPTURE_SETTINGS` | `wait_after_load=1.0`, `max_scroll_steps=40` | 렌더링 대기 시간, 자동 스크롤 수행 횟수 |
-| `_HUMAN_SETTINGS` | `min_text_length=20` | Human Tree에 포함할 최소 텍스트 길이 |
+| `_HUMAN_SETTINGS` | `min_text_length=20`, `restrict_to_viewport=True` | Human Tree에 포함할 최소 텍스트 길이, 뷰포트 필터링 여부 |
 | `_LLM_SETTINGS` | `max_depth=4`, `max_children=6` | 휴리스틱 LLM Tree의 최대 깊이/자식 수 |
 
 필요한 값을 `src/domtree/cli.py`에서 직접 수정한 뒤 CLI를 실행하면 변경사항이 즉시 적용됩니다.

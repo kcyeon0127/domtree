@@ -50,9 +50,44 @@ class CaptureOptions:
     scroll_increment: int = 1_000
     wait_after_load: float = 1.0
     inject_custom_script: Optional[str] = None
+    annotate_bounding_boxes: bool = True
 
     def ensure_dirs(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _annotate_dom(page) -> dict:
+    """Tag DOM nodes with bounding boxes and record viewport size."""
+
+    return page.evaluate(
+        """
+        () => {
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            document
+                .querySelectorAll('[data-domtree-bbox]')
+                .forEach(el => el.removeAttribute('data-domtree-bbox'));
+            const elements = document.querySelectorAll('*');
+            elements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                el.setAttribute(
+                    'data-domtree-bbox',
+                    `${rect.top},${rect.left},${rect.bottom},${rect.right}`
+                );
+            });
+            if (document.body) {
+                document.body.setAttribute(
+                    'data-domtree-viewport',
+                    `${viewportWidth},${viewportHeight}`
+                );
+            }
+            return {
+                viewportWidth,
+                viewportHeight,
+            };
+        }
+        """
+    )
 
 
 def _close_cookie_popups(page, *, texts: Iterable[str], selectors: Iterable[str]) -> None:
@@ -122,6 +157,7 @@ def capture_page(url: str, *, options: Optional[CaptureOptions] = None, name: Op
     html_path = options.output_dir / f"{safe_name}_{timestamp}.html"
 
     logger.info("Capturing %s", url)
+    viewport_meta = {"viewportWidth": None, "viewportHeight": None}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -148,6 +184,10 @@ def capture_page(url: str, *, options: Optional[CaptureOptions] = None, name: Op
 
         _auto_scroll(page, options=options)
 
+        if options.annotate_bounding_boxes:
+            with contextlib.suppress(Exception):
+                viewport_meta = _annotate_dom(page)
+
         page.screenshot(path=str(screenshot_path), full_page=True)
         html_content = page.content()
         html_path.write_text(html_content, encoding="utf-8")
@@ -158,6 +198,7 @@ def capture_page(url: str, *, options: Optional[CaptureOptions] = None, name: Op
     return {
         "screenshot_path": screenshot_path,
         "html_path": html_path,
+        "viewport": viewport_meta,
     }
 
 
