@@ -8,6 +8,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
+import base64
+import json
+import requests
+
 from PIL import Image
 
 from .human_tree import HumanTreeOptions, HumanTreeExtractor
@@ -125,3 +129,116 @@ class StubLLMTreeGenerator(LLMTreeGenerator):
         raise NotImplementedError(
             "StubLLMTreeGenerator cannot produce a tree. Provide a concrete LLM implementation."
         )
+
+
+# --------------------------- Ollama LLaMA vision backend ---------------------------
+
+DEFAULT_VISION_PROMPT = """
+You are a meticulous document analyst. Using the provided webpage screenshot and HTML snippet, infer the human-perceived layout.
+Return ONLY valid JSON matching this schema:
+{
+  "name": "zone|section|paragraph|list|table|figure|...",
+  "label": "string",
+  "metadata": {
+    "type": "zone|section|paragraph|list|table|figure",
+    "role": "main|sidebar|nav|toc|ad|body|...",
+    "reading_order": <integer>,
+    "text_heading": "optional heading text",
+    "heading_level": <optional integer>,
+    "text_preview": "optional excerpt",
+    "dom_refs": ["css selector", ...],
+    "vis_cues": {"bbox": [top,left,bottom,right]}
+  },
+  "children": [ ... recursive ... ]
+}
+Rules:
+- Focus on what is visible in the screenshot. Ignore off-screen DOM sections.
+- Create 1..N root-level zones (main content, sidebar, navigation, etc.).
+- Under zones, add sections (heading hierarchy) and content blocks (paragraph, list, table, figure).
+- Keep reading_order sequential within the visible flow (left to right, top to bottom).
+- If unsure about text, leave text_preview empty instead of guessing.
+Return nothing except the JSON.
+
+HTML SNIPPET (may be truncated):
+{html}
+""".strip()
+
+
+@dataclasses.dataclass
+class OllamaVisionOptions:
+    endpoint: str = "http://localhost:11403/api/chat"
+    model: str = "llama3.2-vision:11b"
+    prompt_template: str = DEFAULT_VISION_PROMPT
+    temperature: float = 0.1
+    max_tokens: int = 2048
+    html_char_limit: int = 20_000
+
+
+class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
+    """Generate trees using Ollama's LLaMA 3.2 Vision 11B model."""
+
+    def __init__(self, options: Optional[OllamaVisionOptions] = None):
+        self.options = options or OllamaVisionOptions()
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        if request.html is None:
+            raise ValueError("OllamaVisionLLMTreeGenerator requires HTML content")
+        if not request.screenshot_path.exists():
+            raise FileNotFoundError(f"Screenshot not found: {request.screenshot_path}")
+
+        html_snippet = request.html[: self.options.html_char_limit]
+        prompt = self.options.prompt_template.format(html=html_snippet)
+
+        image_b64 = self._encode_image(request.screenshot_path)
+        response = self._call_ollama(prompt, image_b64)
+        return self._parse_response(response)
+
+    def _encode_image(self, path: Path) -> str:
+        with path.open("rb") as handle:
+            return base64.b64encode(handle.read()).decode("utf-8")
+
+    def _call_ollama(self, prompt: str, image_b64: str) -> dict:
+        payload = {
+            "model": self.options.model,
+            "stream": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "text", "text": "You return only JSON with the specified schema."}
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image", "image": image_b64},
+                    ],
+                },
+            ],
+            "options": {
+                "temperature": self.options.temperature,
+                "num_predict": self.options.max_tokens,
+            },
+        }
+
+        response = requests.post(self.options.endpoint, json=payload, timeout=180)
+        response.raise_for_status()
+        data = response.json()
+        if "message" not in data or "content" not in data["message"]:
+            raise ValueError(f"Unexpected Ollama response: {data}")
+        return data["message"]
+
+    def _parse_response(self, message: dict) -> TreeNode:
+        parts = message.get("content", [])
+        texts = [part.get("text", "") for part in parts if part.get("type") == "text"]
+        raw_text = "\n".join(texts).strip()
+        if not raw_text:
+            raise ValueError("Ollama response did not contain text")
+
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Failed to decode Ollama JSON response: {raw_text[:200]}...") from exc
+
+        return TreeNode.from_dict(data)

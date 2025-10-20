@@ -117,12 +117,12 @@ domtree batch urls.txt
 4. **비교 및 평가**: TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 두 트리의 차이를 정량화합니다.
 5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_tree.json`/`llm_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다.
 
-## LLM 비교 및 평가 지표
-- **Tree Edit Distance / Normalized TED**: 계층 구조 차이를 비용 관점에서 정량화합니다.
-- **Hierarchical Precision/Recall/F1**: 루트부터 노드까지의 경로가 일치하는 정도로 계층 정확도를 평가합니다.
-- **Structural Similarity**: 노드 수, 깊이, branching factor, 라벨 분포를 비교합니다.
-- **Reading Order Alignment**: Needleman–Wunsch 정렬로 읽기 순서 일치도를 계산합니다.
-- **Mismatch Pattern Report**: 누락/추가 노드, 깊이 이동, 읽기 순서 공백 등 오차 유형을 요약합니다.
+## LLM 비교 및 평가 지표 (실제 구현 기준)
+- **Tree Edit Distance / Normalized TED** (`domtree.metrics.ted`): `zss`를 이용해 삽입·삭제·치환 비용으로 구조 차이를 계산합니다.
+- **Hierarchical Precision/Recall/F1** (`domtree.metrics.hierarchical_f1`): 루트→노드 경로 집합을 비교하여 정밀도/재현율/조화평균을 산출합니다.
+- **Structural Similarity** (`domtree.metrics.structure`): 노드 수, 깊이, 평균 branching, 라벨 분포(코사인 유사도)의 차이를 정규화된 점수로 제공합니다.
+- **Reading Order Alignment** (`domtree.metrics.reading_order`): Needleman–Wunsch 동적 계획법으로 읽기 순서 정렬 점수와 갭(누락된 순서)을 구합니다.
+- **Mismatch Patterns** (`domtree.metrics.mismatch`): 누락/추가 노드 수, 깊이 이동(Depth Shift), 읽기 순서 갭 등 불일치 유형을 요약합니다.
 
 시각화 모듈은 `_FONT_CANDIDATES` 순서대로 사용 가능한 폰트를 탐색하여 `font.family` 스택을 구성하므로, 앞쪽에 있는 범용 폰트(Noto Sans CJK, Arial Unicode 등)가 설치되어 있으면 한글/한자/라틴 혼용 텍스트도 자동으로 커버됩니다. 필요 시 `src/domtree/visualization/tree_plot.py`의 목록(예: `"Nanum Gothic"` → 시스템에 따라 이름이 다를 수 있음)을 조정하거나, 아래 명령으로 폰트를 설치하세요.
 
@@ -147,6 +147,40 @@ domtree batch urls.txt
 - 실서비스용 LLM 연동: `LLMTreeGenerator` 추상 클래스를 구현해 스크린샷·HTML을 LLM에게 전달하고 트리를 받아오는 로직을 추가하세요.
 - 맞춤 메트릭 추가: `domtree.metrics` 모듈에 신규 지표를 구현한 뒤 `domtree.comparison.compute_comparison`에 연결하면 됩니다.
 - 대시보드/노트북 분석: `DomTreeAnalyzer` 클래스를 활용해 파이썬 스크립트나 노트북에서 직접 호출하고, CSV/JSON 결과를 후처리하세요.
+
+### 예: Ollama + LLaMA 3.2 Vision 11B 연동
+
+1. **서버 준비**
+   ```bash
+   # Ollama 설치 (macOS)
+   brew install ollama
+
+   # 모델 다운로드 및 서버 실행
+   ollama pull llama3.2-vision:11b
+   ollama serve
+   ```
+
+2. **파이프라인에서 사용**
+   ```python
+   from domtree.pipeline import DomTreeAnalyzer
+   from domtree.llm_tree import OllamaVisionLLMTreeGenerator, OllamaVisionOptions
+
+   options = OllamaVisionOptions(
+       endpoint="http://localhost:11403/api/chat",
+       model="llama3.2-vision:11b",
+   )
+
+   analyzer = DomTreeAnalyzer(
+       llm_generator=OllamaVisionLLMTreeGenerator(options=options)
+   )
+
+   result = analyzer.analyze_url("https://ko.wikipedia.org/wiki/파이썬")
+   print(result.metrics)
+   ```
+
+   - 프롬프트는 기본적으로 Human Tree 스키마(JSON) 출력을 요구하도록 구성되어 있습니다.
+   - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
+   - Ollama 응답이 JSON 형식을 따르지 않으면 예외가 발생하므로, 필요하면 후처리/재시도 로직을 더할 수 있습니다.
 
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`
