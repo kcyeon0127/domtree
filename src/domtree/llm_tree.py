@@ -207,6 +207,7 @@ class OllamaVisionOptions:
         "\"attributes\": null",
         '"text":',
     )
+    min_total_nodes: int = 3
 
 
 @dataclasses.dataclass
@@ -265,6 +266,18 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 last_reason = "schema_validation"
                 continue
 
+            node_count = self._count_nodes(data)
+            if node_count < self.options.min_total_nodes:
+                logger.debug(
+                    "Attempt %s: Tree too small (%s nodes < min %s)",
+                    attempt,
+                    node_count,
+                    self.options.min_total_nodes,
+                )
+                corrections.append(self._detail_feedback(node_count, self.options.min_total_nodes))
+                last_reason = "insufficient_detail"
+                continue
+
             tree = TreeNode.from_dict(data)
             self._attach_raw_response(
                 tree,
@@ -273,6 +286,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 prompt_hash=self._hash_prompt(full_prompt),
                 status="ok",
             )
+            tree.metadata.notes.setdefault("llm", {})
+            tree.metadata.notes["llm"]["node_count"] = node_count
             return tree
 
         logger.warning("Ollama Vision failed after %s attempts: %s", self.options.max_retries, last_reason)
@@ -442,6 +457,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             raise ValueError(exc.message)
 
     def _negative_guards(self) -> str:
+        min_nodes = self.options.min_total_nodes
         return (
             "\n\nSYSTEM RULES:\n"
             "Return ONE valid JSON object only.\n"
@@ -449,7 +465,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             "Use concrete values extracted from the screenshot.\n"
             "Represent every major visible block (zones → sections → content nodes).\n"
             "Use schema field names exactly (snake_case) and avoid null for arrays/objects.\n"
-            "Keep arrays short (<=5 items) and include only a single bbox array per node."
+            "Keep arrays short (<=5 items) and include only a single bbox array per node.\n"
+            f"Ensure the tree contains at least {min_nodes} nodes covering the visible content."
         )
 
     @staticmethod
@@ -468,6 +485,23 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
     def _validation_feedback(error: str) -> str:
         return (
             f"\n\nSYSTEM CORRECTION: The JSON violated the schema ({error}). Every node must include the 'metadata' object and the required fields from the schema. Fix the structure and return JSON only."
+        )
+
+    @staticmethod
+    def _count_nodes(data: dict) -> int:
+        count = 1
+        children = data.get("children", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    count += OllamaVisionLLMTreeGenerator._count_nodes(child)
+        return count
+
+    @staticmethod
+    def _detail_feedback(node_count: int, target: int) -> str:
+        return (
+            f"\n\nSYSTEM CORRECTION: The previous JSON contained only {node_count} nodes, but at least {target} nodes are expected."
+            " Break down the layout into more zones, sections, and paragraph/list/table nodes to capture visible details."
         )
 
     def _compose_prompt(self, base_prompt: str, corrections: Iterable[str]) -> str:
