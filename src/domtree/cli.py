@@ -122,6 +122,7 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
     if result.llm_dom_tree is not None:
         (run_dir / "llm_dom_tree.json").write_text(result.llm_dom_tree.to_json(indent=2), encoding="utf-8")
+        _write_llm_comparison(result, run_dir)
     analyzer.visualize(
         result,
         zone_side_by_side_path=run_dir / "comparison_zone.png",
@@ -148,6 +149,39 @@ def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path)
     _write_json(run_dir / "summary.json", summary)
     _write_json(run_dir / "results.json", detailed_records)
     export_csv(result_list, run_dir / "results.csv")
+
+
+def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
+    if not (result.zone_dom_comparison and result.heading_dom_comparison):
+        return
+
+    zone_vis = result.zone_comparison.metrics.flat()
+    heading_vis = result.heading_comparison.metrics.flat()
+    zone_dom = result.zone_dom_comparison.metrics.flat()
+    heading_dom = result.heading_dom_comparison.metrics.flat()
+
+    def _delta(dom_metrics: dict, vis_metrics: dict) -> dict:
+        delta = {}
+        for key, dom_value in dom_metrics.items():
+            vis_value = vis_metrics.get(key)
+            if isinstance(dom_value, (int, float)) and isinstance(vis_value, (int, float)):
+                delta[key] = dom_value - vis_value
+        return delta
+
+    comparison = {
+        "zone": {
+            "vision": zone_vis,
+            "vision_dom": zone_dom,
+            "delta": _delta(zone_dom, zone_vis),
+        },
+        "heading": {
+            "vision": heading_vis,
+            "vision_dom": heading_dom,
+            "delta": _delta(heading_dom, heading_vis),
+        },
+    }
+
+    _write_json(run_dir / "llm_comparison.json", comparison)
 
 
 @app.command()

@@ -132,7 +132,7 @@ domtree batch urls.txt
 2. **Human Tree 추출**: Zone(시맨틱 컨테이너) → Heading → 콘텐츠 블록 순으로 계층을 구축하고, `reading_order`, `dom_refs`, `vis_cues`(bbox 포함) 등 메타데이터를 채웁니다. 기본 설정(`restrict_to_viewport=True`)은 스크린샷에 실제 보인 부분만 유지합니다.
 3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현하거나 파라미터를 조정해 자유롭게 구성할 수 있습니다.
 4. **비교 및 평가**: TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 두 트리의 차이를 정량화합니다.
-5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다. Vision 기반 LLM 결과(`llm_tree.json`)와 DOM 요약을 추가로 제공한 결과(`llm_dom_tree.json`)를 모두 저장합니다.
+5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다. Vision 기반 LLM 결과(`llm_tree.json`)와 DOM 요약을 추가로 제공한 결과(`llm_dom_tree.json`)를 모두 저장하며, 두 결과의 지표 차이를 요약한 `llm_comparison.json`도 생성됩니다.
 
 ## LLM 비교 및 평가 지표 (실제 구현 기준)
 - **Tree Edit Distance / Normalized TED** (`domtree.metrics.ted`): `zss`를 이용해 삽입·삭제·치환 비용으로 구조 차이를 계산합니다.
