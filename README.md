@@ -15,6 +15,7 @@
 - README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.
 - 실행 결과물이 자동으로 저장되는 기본 경로 설명을 보강해 `--visualize-dir`, `--output-json` 없이도 PNG/JSON이 생성된다는 점을 명확히 했습니다.
 - Ollama Vision 응답이 서술형 텍스트로 반환되더라도 JSON 블록을 추출해 파싱하도록 보강하고, `format="json"` 옵션으로 JSON 출력 준수를 강제했습니다.
+- JSON 파싱에 실패하더라도 `llm_error` 노드를 반환해 파이프라인이 중단되지 않고, `llm_tree.json`에 원본 응답(`attributes.llm.raw_response`)과 요약이 기록되도록 했습니다.
 
 ## 빠른 시작
 ```bash
@@ -193,6 +194,7 @@ domtree batch urls.txt
    - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
    - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
    - 기본적으로 `format="json"`이 설정되어, 모델이 JSON만 반환하도록 강제합니다. 그래도 서술형 텍스트가 섞여 나오면 코드가 자동으로 JSON 블록을 추출해 파싱합니다.
+   - JSON을 끝내 파싱하지 못하면 `llm_error` 루트 노드로 대체하여 분석이 계속되고, `llm_tree.json` → `attributes.llm.raw_response`에 원본 응답이 그대로 저장됩니다.
    - Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
 
 3. **CLI에서 사용**

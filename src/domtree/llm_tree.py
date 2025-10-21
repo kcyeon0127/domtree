@@ -187,7 +187,9 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
 
         image_b64 = self._encode_image(request.screenshot_path)
         response = self._call_ollama(prompt, image_b64)
-        return self._parse_response(response)
+        tree = self._parse_response(response)
+        self._attach_raw_response(tree, response)
+        return tree
 
     def _encode_image(self, path: Path) -> str:
         with path.open("rb") as handle:
@@ -226,7 +228,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 return TreeNode.from_dict(data)
 
         preview = raw_text[:200].replace("\n", " ")
-        raise ValueError(f"Failed to decode Ollama JSON response: {preview}...")
+        logger.warning("Ollama response could not be parsed as JSON: %s...", preview)
+        return self._build_error_tree(raw_text)
 
     def _candidate_json_strings(self, raw_text: str) -> Iterable[str]:
         text = raw_text.strip()
@@ -256,3 +259,33 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if start == -1 or end == -1 or end <= start:
             return None
         return text[start : end + 1].strip()
+
+    def _attach_raw_response(self, tree: TreeNode, raw_text: str) -> None:
+        preview = self._truncate(raw_text)
+        tree.metadata.notes.setdefault("llm", {})
+        tree.metadata.notes["llm"]["raw_response_preview"] = preview
+        tree.attributes.setdefault("llm", {})
+        tree.attributes["llm"]["raw_response"] = raw_text
+
+    def _build_error_tree(self, raw_text: str) -> TreeNode:
+        notes = {
+            "llm": {
+                "error": "invalid_json",
+                "raw_response_preview": self._truncate(raw_text),
+            }
+        }
+        metadata = NodeMetadata(
+            node_type="llm_error",
+            text_heading="LLM JSON 파싱 실패",
+            text_preview=self._truncate(raw_text, limit=400),
+            notes=notes,
+        )
+        attributes = {"llm": {"raw_response": raw_text}}
+        return TreeNode(name="llm_error", label="LLM Parse Failure", metadata=metadata, attributes=attributes)
+
+    @staticmethod
+    def _truncate(text: str, *, limit: int = 1200) -> str:
+        text = text.strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
