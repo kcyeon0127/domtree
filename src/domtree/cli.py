@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import re
 from datetime import datetime
 from pathlib import Path
@@ -101,14 +102,26 @@ def _write_json(path: Path, data) -> None:
 def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: Path) -> None:
     record = result.to_dict()
     _write_json(run_dir / "result.json", record)
-    (run_dir / "human_tree.json").write_text(result.human_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "human_zone_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "human_heading_tree.json").write_text(result.human_heading_tree.to_json(indent=2), encoding="utf-8")
+    # Backwards compatibility: keep legacy filename pointing to zone tree
+    (run_dir / "human_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
     analyzer.visualize(
         result,
-        side_by_side_path=run_dir / "comparison.png",
-        human_path=run_dir / "human.png",
+        zone_side_by_side_path=run_dir / "comparison_zone.png",
+        heading_side_by_side_path=run_dir / "comparison_heading.png",
+        zone_path=run_dir / "human_zone.png",
+        heading_path=run_dir / "human_heading.png",
         llm_path=run_dir / "llm.png",
     )
+    # Legacy filenames for downstream compatibility
+    zone_comparison = run_dir / "comparison_zone.png"
+    zone_human = run_dir / "human_zone.png"
+    if zone_comparison.exists():
+        shutil.copyfile(zone_comparison, run_dir / "comparison.png")
+    if zone_human.exists():
+        shutil.copyfile(zone_human, run_dir / "human.png")
 
 
 def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path) -> None:

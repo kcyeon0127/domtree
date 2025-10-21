@@ -55,6 +55,14 @@ class HumanTreeOptions:
     include_tables: bool = True
     include_figures: bool = True
     restrict_to_viewport: bool = True
+    include_text_nodes: bool = False
+    max_list_items: int = 5
+
+
+@dataclasses.dataclass
+class HumanTreeBundle:
+    zone_tree: TreeNode
+    heading_tree: TreeNode
 
 
 class HumanTreeExtractor:
@@ -66,14 +74,27 @@ class HumanTreeExtractor:
         self.options = options or HumanTreeOptions()
         self.soup = self._prepare_soup(html)
         self._reading_counter = 1
+        self._heading_counter = 1
         self._processed: set[int] = set()
         self.viewport_width: Optional[float] = None
         self.viewport_height: Optional[float] = None
 
-    def extract(self) -> TreeNode:
+    def extract(self) -> HumanTreeBundle:
         body = self.soup.body or self.soup
         title_text = self.soup.title.get_text(strip=True) if self.soup.title else ""
         root_label = self.url or title_text or "document"
+
+        self._processed.clear()
+        self._reading_counter = 1
+        zone_tree = self._build_zone_tree(body, root_label, title_text)
+
+        self._processed.clear()
+        self._heading_counter = 1
+        heading_tree = self._build_heading_tree(body, root_label, title_text)
+
+        return HumanTreeBundle(zone_tree=zone_tree, heading_tree=heading_tree)
+
+    def _build_zone_tree(self, body: Tag, root_label: str, title_text: str) -> TreeNode:
         root_meta = NodeMetadata(
             node_type="page",
             role="root",
@@ -88,7 +109,48 @@ class HumanTreeExtractor:
             zone_node = self._build_zone_node(zone_element)
             if zone_node:
                 root.add_child(zone_node)
+        return root
 
+    def _build_heading_tree(self, body: Tag, root_label: str, title_text: str) -> TreeNode:
+        heading_label = f"{root_label} (headings)" if root_label else "headings"
+        root_meta = NodeMetadata(
+            node_type="page",
+            role="heading_root",
+            reading_order=0,
+            text_heading=title_text or None,
+            language=self._detect_language(),
+        )
+        root = TreeNode(name="page", label=heading_label, metadata=root_meta)
+
+        stack: List[Tuple[int, TreeNode]] = [(0, root)]
+        for heading in body.find_all(HEADING_TAGS):
+            if not heading.name or len(heading.name) < 2:
+                continue
+            level_part = heading.name[1:]
+            if not level_part.isdigit():
+                continue
+            level = int(level_part)
+            if not self._is_visible(heading):
+                continue
+            heading_text = self._normalize_text(heading.get_text(" "))
+            metadata = NodeMetadata(
+                node_type="section",
+                role="section",
+                text_heading=heading_text[: self.options.heading_text_limit] if heading_text else None,
+                heading_level=level,
+                reading_order=self._next_heading_order(),
+                dom_refs=[self._dom_ref(heading)],
+                visual_cues=self._visual_cues(heading),
+            )
+            if self.options.restrict_to_viewport and not self._bbox_in_viewport(metadata.visual_cues.bbox):
+                continue
+            label = metadata.text_heading or heading.name.upper()
+            node = TreeNode(name="section", label=label, metadata=metadata)
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            parent = stack[-1][1] if stack else root
+            parent.add_child(node)
+            stack.append((level, node))
         return root
 
     # --------------------------- zone detection ----------------------------
@@ -216,10 +278,11 @@ class HumanTreeExtractor:
                     self._consume_subtree(current)
                 current = current.next_element
             elif isinstance(current, NavigableString):
-                text = self._normalize_text(str(current))
-                if text:
-                    text_node = self._create_text_node(text)
-                    nodes.append(text_node)
+                if self.options.include_text_nodes:
+                    text = self._normalize_text(str(current))
+                    if text and len(text) >= self.options.min_text_length:
+                        text_node = self._create_text_node(text)
+                        nodes.append(text_node)
                 current = current.next_element
             else:
                 current = current.next_element
@@ -236,9 +299,10 @@ class HumanTreeExtractor:
                     nodes.append(node)
                     self._consume_subtree(child)
             elif isinstance(child, NavigableString):
-                text = self._normalize_text(str(child))
-                if text:
-                    nodes.append(self._create_text_node(text))
+                if self.options.include_text_nodes:
+                    text = self._normalize_text(str(child))
+                    if text and len(text) >= self.options.min_text_length:
+                        nodes.append(self._create_text_node(text))
         return nodes
 
     def _collect_content_node(self, element: Tag, parent_metadata: Optional[NodeMetadata] = None) -> Optional[TreeNode]:
@@ -275,6 +339,8 @@ class HumanTreeExtractor:
                     continue
                 node.add_child(TreeNode(name="list_item", label=li_text or "item", metadata=li_meta))
                 self._processed.add(id(li))
+                if len(node.children) >= self.options.max_list_items:
+                    break
         return node
 
     def _create_text_node(self, text: str) -> TreeNode:
@@ -445,7 +511,12 @@ class HumanTreeExtractor:
         self._reading_counter += 1
         return value
 
+    def _next_heading_order(self) -> int:
+        value = self._heading_counter
+        self._heading_counter += 1
+        return value
 
-def extract_human_tree(html: str, *, url: Optional[str] = None, options: Optional[HumanTreeOptions] = None) -> TreeNode:
+
+def extract_human_tree(html: str, *, url: Optional[str] = None, options: Optional[HumanTreeOptions] = None) -> HumanTreeBundle:
     extractor = HumanTreeExtractor(html, url=url, options=options)
     return extractor.extract()

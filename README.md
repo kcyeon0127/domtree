@@ -18,8 +18,9 @@
 - JSON 파싱에 실패하더라도 `llm_error` 노드를 반환해 파이프라인이 중단되지 않고, `llm_tree.json`에 원본 응답(`attributes.llm.raw_response`)과 요약이 기록되도록 했습니다.
 - 템플릿/스키마 응답을 자동 감지해 최대 3회까지 재시도하며, 각 재시도 프롬프트에 교정 메시지를 삽입하고 실패 사유·프롬프트 해시·시도 횟수를 메타데이터로 남기도록 강화했습니다.
 - JSON Schema(Draft-07)를 정식 정의해 LLM 응답을 검증하며, 스키마 본문을 프롬프트에 포함해 “해당 스키마를 따르라”고 명시했습니다.
-- Human Tree 기본 옵션에 `restrict_to_viewport=True`를 명시하고, LLM 프롬프트에 상세한 구조화 가이드를 추가해 두 트리의 복잡도를 보다 균형 있게 맞췄습니다.
-- LLM 응답이 최소 노드 수(`min_total_nodes`, 기본 20)를 충족하지 못하면 자동으로 세분화 요청을 재전송하도록 보강했습니다.
+- Human Tree 기본 옵션에 `restrict_to_viewport=True`를 명시하고, 텍스트 노드 생성을 기본 비활성화(`include_text_nodes=False`), 리스트 항목을 최대 5개만 유지하도록 조정해 구조를 간결하게 했습니다.
+- Human Tree 결과를 Zone Tree와 Heading Tree로 분리 저장하고, 각각을 LLM 트리와 독립적으로 비교·시각화하도록 파이프라인을 개편했습니다.
+- LLM 응답이 최소 노드 수(`min_total_nodes`, 기본 10)를 충족하지 못하면 자동으로 세분화 요청을 재전송하도록 보강했습니다.
 
 ## 빠른 시작
 ```bash
@@ -62,7 +63,7 @@ domtree batch urls.txt
 
 ## 구성 요소
 - `domtree.capture`: Playwright 캡처 옵션과 전체 페이지 스크린샷/HTML 저장 로직
-- `domtree.human_tree`: **Zone(시각 영역) ⊃ Heading(논리 계층)** 중첩 트리를 생성하는 휴먼 퍼셉션 추출기
+- `domtree.human_tree`: Zone Tree와 Heading Tree를 동시에 생성하는 휴먼 퍼셉션 추출기 (각 트리는 별도의 비교·시각화에 활용)
 - `domtree.llm_tree`: 휴리스틱 LLM 트리 생성기 + Ollama 기반 LLaMA 3.2 Vision 11B 연동 구현 (`OllamaVisionLLMTreeGenerator`), 기타 LLM 연동을 위한 인터페이스
 - `domtree.metrics`: TED, 계층 F1, 구조적 유사도, 읽기 순서 정렬, 불일치 패턴 분류 등 핵심 메트릭
 - `domtree.pipeline`: 전체 파이프라인 오케스트레이션, 배치 처리, 시각화, 요약 통계
@@ -124,12 +125,14 @@ domtree batch urls.txt
 
 > 기본 동작은 스크린샷 뷰포트에 실제로 렌더링된 요소만 유지합니다. Playwright 캡처 단계에서 모든 노드에 `data-domtree-bbox`(bounding box)와 `data-domtree-viewport`(뷰포트 크기) 속성을 주입하고, `HumanTreeExtractor`가 이를 사용해 뷰포트와 겹치지 않는 노드를 제외합니다. 필요하면 `HumanTreeOptions(restrict_to_viewport=False)`로 전체 DOM을 분석하도록 변경할 수 있습니다.
 
+기본 `HumanTreeOptions`는 텍스트 노드 생성을 비활성화(`include_text_nodes=False`)하고, 리스트 항목은 최대 5개(`max_list_items=5`)까지만 유지해 트리가 과도하게 세분화되는 것을 막습니다. 더 풍부한 텍스트 단위를 보고 싶다면 `include_text_nodes=True`나 `max_list_items=` 값을 필요에 따라 조정하세요.
+
 ## Human Tree/Human vs LLM 워크플로
 1. **Capture**: Playwright가 렌더링 완료까지 대기한 뒤 전체 페이지를 스크롤·캡처하고 HTML을 저장합니다. 이때 모든 DOM 요소에 `data-domtree-bbox`/`data-domtree-viewport` 속성을 주입해 뷰포트 좌표를 기록합니다.
 2. **Human Tree 추출**: Zone(시맨틱 컨테이너) → Heading → 콘텐츠 블록 순으로 계층을 구축하고, `reading_order`, `dom_refs`, `vis_cues`(bbox 포함) 등 메타데이터를 채웁니다. 기본 설정(`restrict_to_viewport=True`)은 스크린샷에 실제 보인 부분만 유지합니다.
 3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현하거나 파라미터를 조정해 자유롭게 구성할 수 있습니다.
 4. **비교 및 평가**: TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 두 트리의 차이를 정량화합니다.
-5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_tree.json`/`llm_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다.
+5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다.
 
 ## LLM 비교 및 평가 지표 (실제 구현 기준)
 - **Tree Edit Distance / Normalized TED** (`domtree.metrics.ted`): `zss`를 이용해 삽입·삭제·치환 비용으로 구조 차이를 계산합니다.
@@ -144,7 +147,7 @@ domtree batch urls.txt
 - Ubuntu/Debian: `sudo apt install fonts-nanum fonts-noto-cjk`
 - Conda 환경: `conda install -c conda-forge noto-fonts-cjk` (macOS arm64에서는 일부 폰트 패키지가 제공되지 않을 수 있습니다)
 - 번들 사용: `src/assets/fonts/`에 원하는 `.ttf/.otf/.ttc` 파일을 넣으면 앱이 자동으로 모두 로드합니다. 예: `Nanum Gothic`, `Noto Sans CJK`, `Noto Sans Sinhala` 등을 넣어두면 서버 환경에서도 동일한 폰트 스택이 적용됩니다. 추가 폰트를 넣었다면 라이선스 파일도 함께 보관하세요.
-- 시각화 PNG에서는 가독성을 위해 지원되지 않는 문자(폰트에 없는 스크립트)는 자동으로 제거/생략됩니다. 원본 텍스트는 `human_tree.json`/`llm_tree.json` 메타데이터에 그대로 남습니다.
+- 시각화 PNG에서는 가독성을 위해 지원되지 않는 문자(폰트에 없는 스크립트)는 자동으로 제거/생략됩니다. 원본 텍스트는 `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json` 메타데이터에 그대로 남습니다.
 
 ### CLI 기본 하이퍼파라미터 조정
 터미널 실행 시에는 내부 기본값을 사용하며, 아래 상수를 수정해 하이퍼파라미터를 조절할 수 있습니다.
@@ -208,7 +211,7 @@ domtree batch urls.txt
 - **네거티브 가드**: 시스템 규칙에 “구체 값만, 스키마/코드펜스 금지” 문구를 강하게 삽입했습니다.
 - **템플릿 감지 & 교정 프롬프트**: `zone|section|…`, `optional heading` 등 마커가 감지되면 “스키마가 아닌 실제 데이터를 출력하라”는 교정 메시지를 추가해 재시도합니다.
 - **정식 JSON Schema 검증**: `src/domtree/schema.py`에 정의한 `TREE_JSON_SCHEMA`(Draft-07)를 사용해 응답을 검증하고, 스키마 위반 시 구체적인 오류 메시지로 재시도 지침을 전달합니다.
-- **세분화 보장**: 트리 노드 수가 `min_total_nodes`(기본 20)보다 작으면 “더 많은 존/섹션/컨텐츠 노드를 추가하라”는 교정 메시지를 보내 재시도합니다.
+- **세분화 보장**: 트리 노드 수가 `min_total_nodes`(기본 10)보다 작으면 “더 많은 존/섹션/컨텐츠 노드를 추가하라”는 교정 메시지를 보내 재시도합니다.
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
 - `max_retries`나 `template_markers`는 `OllamaVisionOptions` 인자로 조정할 수 있습니다.
 - **커스터마이징 예시**:
@@ -246,7 +249,7 @@ LLM이 따라야 하는 JSON Schema는 `src/domtree/schema.py`의 `TREE_JSON_SCH
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`
 - 배치/결과 리포트: 기본 `data/output/` (옵션으로 변경 가능)
-- 시각화 이미지: 각 실행 디렉터리(`comparison.png`, `human.png`, `llm.png`)에 자동 저장
+- 시각화 이미지: 각 실행 디렉터리에는 `comparison_zone.png`, `comparison_heading.png`, `human_zone.png`, `human_heading.png`, `llm.png`이 생성되며, 호환성을 위해 `comparison.png`와 `human.png`는 Zone Tree 기준 이미지로 동시에 제공됩니다.
 
 ## 라이선스
 프로젝트 라이선스는 별도 안내를 참고하거나 담당자에게 문의하세요.

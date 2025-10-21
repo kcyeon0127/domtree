@@ -66,7 +66,8 @@ class HeuristicLLMTreeGenerator(LLMTreeGenerator):
         if html is None:
             raise ValueError("HeuristicLLMTreeGenerator requires HTML content for now")
 
-        human_tree = HumanTreeExtractor(html, options=self.options.human_tree_options).extract()
+        human_trees = HumanTreeExtractor(html, options=self.options.human_tree_options).extract()
+        human_tree = human_trees.zone_tree
         visual_profile = self._analyze_screenshot(request.screenshot_path)
         logger.debug("Computed visual profile: %s", visual_profile)
         simplified = self._simplify_tree(human_tree, visual_profile)
@@ -154,7 +155,7 @@ Structural requirements:
 - Under each section, include paragraph/list/table/figure nodes for major content blocks. Avoid collapsing multiple paragraphs into one node.
 - Include reading_order for every node in visible order (top-left → bottom-right).
 - When lists or tables are visible, represent them as separate nodes with suitable children if necessary.
-- Aim to capture at least 20 nodes when the screenshot contains sufficient content.
+- Aim to capture at least 10 nodes when the screenshot contains sufficient content.
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
@@ -186,7 +187,7 @@ class OllamaVisionOptions:
         "example",
         "placeholder",
     )
-    min_total_nodes: int = 20
+    min_total_nodes: int = 10
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -246,7 +247,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                     node_count,
                     self.options.min_total_nodes,
                 )
-                corrections.append(self._detail_feedback(node_count))
+                corrections.append(self._detail_feedback(node_count, self.options.min_total_nodes))
                 last_reason = "insufficient_detail"
                 continue
 
@@ -461,8 +462,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         return count
 
     @staticmethod
-    def _detail_feedback(node_count: int) -> str:
+    def _detail_feedback(node_count: int, target: int) -> str:
         return (
-            f"\n\nSYSTEM CORRECTION: The previous JSON contained only {node_count} nodes."
+            f"\n\nSYSTEM CORRECTION: The previous JSON contained only {node_count} nodes, but at least {target} nodes are expected."
             " Break down the layout into more zones, sections, and paragraph/list/table nodes to capture visible details."
         )
