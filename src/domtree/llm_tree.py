@@ -165,6 +165,7 @@ Field requirements:
 - Choose descriptive `name`/`type` values derived from the content (e.g., "zone_main", "section_introduction", "paragraph_overview"). Avoid generic placeholders like "top-1".
 - Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview` rather than inventing new top-level keys.
 - Do not invent custom top-level keys such as `text`, `content`, or `summary`; follow the schema exactly.
+- Keep JSON concise: limit arrays to at most 5 items and numeric precision to two decimals. For `vis_cues`, provide a single `bbox` array with four numbers (top, left, bottom, right) and omit any `bboxes` collection.
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
@@ -205,7 +206,6 @@ class OllamaVisionOptions:
         "\"attributes\": null",
         '"text":',
     )
-    min_total_nodes: int = 10
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -257,18 +257,6 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 last_reason = "schema_validation"
                 continue
 
-            node_count = self._count_nodes(data)
-            if node_count < self.options.min_total_nodes:
-                logger.debug(
-                    "Attempt %s: Tree too small (%s nodes < min %s)",
-                    attempt,
-                    node_count,
-                    self.options.min_total_nodes,
-                )
-                corrections.append(self._detail_feedback(node_count, self.options.min_total_nodes))
-                last_reason = "insufficient_detail"
-                continue
-
             tree = TreeNode.from_dict(data)
             self._attach_raw_response(
                 tree,
@@ -277,8 +265,6 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 prompt_hash=self._hash_prompt(full_prompt),
                 status="ok",
             )
-            tree.metadata.notes.setdefault("llm", {})
-            tree.metadata.notes["llm"]["node_count"] = node_count
             return tree
 
         logger.warning("Ollama Vision failed after %s attempts: %s", self.options.max_retries, last_reason)
@@ -337,11 +323,9 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         text = raw_text.strip()
         candidates = [text]
 
-        if text.startswith("```"):
-            fenced = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-            fenced = re.sub(r"\s*```$", "", fenced).strip()
-            if fenced:
-                candidates.append(fenced)
+        fenced = self._extract_fenced_json(text)
+        if fenced:
+            candidates.append(fenced)
 
         brace_candidate = self._extract_braced_json(text)
         if brace_candidate:
@@ -360,7 +344,28 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         end = text.rfind("}")
         if start == -1 or end == -1 or end <= start:
             return None
-        return text[start : end + 1].strip()
+        candidate = text[start : end + 1]
+        try:
+            depth = 0
+            for idx, char in enumerate(candidate):
+                if char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0 and idx != len(candidate) - 1:
+                        candidate = candidate[: idx + 1]
+                        break
+        except Exception:
+            pass
+        return candidate.strip()
+
+    @staticmethod
+    def _extract_fenced_json(text: str) -> Optional[str]:
+        pattern = r"```(?:json)?\s*(.*?)\s*```"
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return None
 
     def _attach_raw_response(
         self,
@@ -435,7 +440,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             "Do NOT include code fences, explanations, schemas, or placeholders such as 'zone|section|...'.\n"
             "Use concrete values extracted from the screenshot.\n"
             "Represent every major visible block (zones → sections → content nodes).\n"
-            "Use schema field names exactly (snake_case) and avoid null for arrays/objects."
+            "Use schema field names exactly (snake_case) and avoid null for arrays/objects.\n"
+            "Keep arrays short (<=5 items) and include only a single bbox array per node."
         )
 
     @staticmethod
@@ -469,20 +475,3 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if len(text) <= limit:
             return text
         return text[: limit - 3] + "..."
-
-    @staticmethod
-    def _count_nodes(data: dict) -> int:
-        count = 1
-        children = data.get("children", [])
-        if isinstance(children, list):
-            for child in children:
-                if isinstance(child, dict):
-                    count += OllamaVisionLLMTreeGenerator._count_nodes(child)
-        return count
-
-    @staticmethod
-    def _detail_feedback(node_count: int, target: int) -> str:
-        return (
-            f"\n\nSYSTEM CORRECTION: The previous JSON contained only {node_count} nodes, but at least {target} nodes are expected."
-            " Break down the layout into more zones, sections, and paragraph/list/table nodes to capture visible details."
-        )

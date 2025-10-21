@@ -117,16 +117,25 @@ def _child_offsets(count: int, gap: float) -> list[float]:
     return [start + i * gap for i in range(count)]
 
 
-def plot_tree(tree: TreeNode, *, title: str = "Tree", figsize: Tuple[int, int] = (8, 6), path: Path | None = None) -> None:
+def plot_tree(
+    tree: TreeNode,
+    *,
+    title: str = "Tree",
+    figsize: Tuple[int, int] = (12, 6),
+    node_size: int = 800,
+    arrows: bool = False,
+    font_size: int = 9,
+    path: Path | None = None,
+) -> None:
     graph = _build_graph(tree)
     pos = _hierarchy_positions(graph, tree.identifier)
     raw_labels = nx.get_node_attributes(graph, "label")
     labels = {node_id: _sanitize_label(label) for node_id, label in raw_labels.items()}
 
     fig, ax = plt.subplots(figsize=figsize)
-    nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#90caf9", ax=ax)
-    nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
-    label_kwargs = {"font_size": 8, "ax": ax}
+    nx.draw_networkx_nodes(graph, pos, node_size=node_size, node_color="#90caf9", ax=ax)
+    nx.draw_networkx_edges(graph, pos, arrows=arrows, arrowstyle="-|>", arrowsize=10, ax=ax)
+    label_kwargs = {"font_size": font_size, "ax": ax}
     if _FONT_STACK:
         label_kwargs["font_family"] = _FONT_STACK
     nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
@@ -138,14 +147,22 @@ def plot_tree(tree: TreeNode, *, title: str = "Tree", figsize: Tuple[int, int] =
     plt.close(fig)
 
 
-def plot_side_by_side(human_tree: TreeNode, llm_tree: TreeNode, *, path: Path | None = None) -> None:
+def plot_side_by_side(
+    human_tree: TreeNode,
+    llm_tree: TreeNode,
+    *,
+    figsize: Tuple[int, int] = (18, 7),
+    node_size: int = 800,
+    font_size: int = 9,
+    path: Path | None = None,
+) -> None:
     graph_left = _build_graph(human_tree)
     graph_right = _build_graph(llm_tree)
 
     pos_left = _hierarchy_positions(graph_left, human_tree.identifier)
     pos_right = _hierarchy_positions(graph_right, llm_tree.identifier)
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
     for ax, graph, pos, title in zip(
         axes,
         (graph_left, graph_right),
@@ -154,9 +171,9 @@ def plot_side_by_side(human_tree: TreeNode, llm_tree: TreeNode, *, path: Path | 
     ):
         raw_labels = nx.get_node_attributes(graph, "label")
         labels = {node_id: _sanitize_label(label) for node_id, label in raw_labels.items()}
-        nx.draw_networkx_nodes(graph, pos, node_size=600, node_color="#a5d6a7", ax=ax)
+        nx.draw_networkx_nodes(graph, pos, node_size=node_size, node_color="#a5d6a7", ax=ax)
         nx.draw_networkx_edges(graph, pos, arrows=False, ax=ax)
-        label_kwargs = {"font_size": 8, "ax": ax}
+        label_kwargs = {"font_size": font_size, "ax": ax}
         if _FONT_STACK:
             label_kwargs["font_family"] = _FONT_STACK
         nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)

@@ -20,7 +20,7 @@
 - JSON Schema(Draft-07)를 정식 정의해 LLM 응답을 검증하며, 스키마 본문을 프롬프트에 포함해 “해당 스키마를 따르라”고 명시했습니다.
 - Human Tree 기본 옵션에 `restrict_to_viewport=True`를 명시하고, 텍스트 노드 생성을 기본 비활성화(`include_text_nodes=False`), 리스트 항목을 최대 5개만 유지하도록 조정해 구조를 간결하게 했습니다.
 - Human Tree 결과를 Zone Tree와 Heading Tree로 분리 저장하고, 각각을 LLM 트리와 독립적으로 비교·시각화하도록 파이프라인을 개편했습니다.
-- LLM 응답이 최소 노드 수(`min_total_nodes`, 기본 10)를 충족하지 못하면 자동으로 세분화 요청을 재전송하도록 보강했습니다.
+- LLM 응답이 스키마를 벗어나거나 템플릿/형식 오류를 내면 즉시 교정 프롬프트로 재요청하고, JSON 파싱 실패 로그를 `llm_error` 노드에 기록하도록 강화했습니다.
 
 ## 빠른 시작
 ```bash
@@ -211,14 +211,13 @@ domtree batch urls.txt
 - **네거티브 가드**: 시스템 규칙에 “구체 값만, 스키마/코드펜스 금지” 문구를 강하게 삽입했습니다.
 - **템플릿 감지 & 교정 프롬프트**: `zone|section|…`, `optional heading` 등 마커가 감지되면 “스키마가 아닌 실제 데이터를 출력하라”는 교정 메시지를 추가해 재시도합니다.
 - **정식 JSON Schema 검증**: `src/domtree/schema.py`에 정의한 `TREE_JSON_SCHEMA`(Draft-07)를 사용해 응답을 검증하고, 스키마 위반 시 구체적인 오류 메시지로 재시도 지침을 전달합니다.
-- **세분화 보장**: 트리 노드 수가 `min_total_nodes`(기본 10)보다 작으면 “더 많은 존/섹션/컨텐츠 노드를 추가하라”는 교정 메시지를 보내 재시도합니다.
+- **세분화 보장**: 템플릿/스키마 위반이나 JSON 파싱 오류가 감지되면 자동으로 교정 메시지를 추가해 재시도합니다.
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
 - `max_retries`나 `template_markers`는 `OllamaVisionOptions` 인자로 조정할 수 있습니다.
 - **커스터마이징 예시**:
   ```python
   options = OllamaVisionOptions(
       max_retries=5,
-      min_total_nodes=30,
       template_markers=(
           "zone|section|paragraph|list|table|figure",
           "optional heading",
