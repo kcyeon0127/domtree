@@ -134,7 +134,7 @@ class StubLLMTreeGenerator(LLMTreeGenerator):
 # --------------------------- Ollama LLaMA vision backend ---------------------------
 
 DEFAULT_VISION_PROMPT = """
-You are a meticulous document analyst. Using the provided webpage screenshot and HTML snippet, infer the human-perceived layout.
+You are a meticulous document analyst. Using ONLY the provided webpage screenshot (ignore HTML) infer the human-perceived layout.
 Return ONLY valid JSON matching this schema:
 {
   "name": "zone|section|paragraph|list|table|figure|...",
@@ -159,8 +159,6 @@ Rules:
 - If unsure about text, leave text_preview empty instead of guessing.
 Return nothing except the JSON.
 
-HTML SNIPPET (may be truncated):
-{html}
 """.strip()
 
 
@@ -171,7 +169,6 @@ class OllamaVisionOptions:
     prompt_template: str = DEFAULT_VISION_PROMPT
     temperature: float = 0.1
     max_tokens: int = 2048
-    html_char_limit: int = 20_000
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -181,13 +178,10 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         self.options = options or OllamaVisionOptions()
 
     def generate(self, request: LLMTreeRequest) -> TreeNode:
-        if request.html is None:
-            raise ValueError("OllamaVisionLLMTreeGenerator requires HTML content")
         if not request.screenshot_path.exists():
             raise FileNotFoundError(f"Screenshot not found: {request.screenshot_path}")
 
-        html_snippet = request.html[: self.options.html_char_limit]
-        prompt = self.options.prompt_template.format(html=html_snippet)
+        prompt = self.options.prompt_template
 
         image_b64 = self._encode_image(request.screenshot_path)
         response = self._call_ollama(prompt, image_b64)

@@ -49,7 +49,7 @@ domtree batch urls.txt
 ## 구성 요소
 - `domtree.capture`: Playwright 캡처 옵션과 전체 페이지 스크린샷/HTML 저장 로직
 - `domtree.human_tree`: **Zone(시각 영역) ⊃ Heading(논리 계층)** 중첩 트리를 생성하는 휴먼 퍼셉션 추출기
-- `domtree.llm_tree`: 휴리스틱 LLM 트리 생성기와 추상화 파라미터, 향후 실제 LLM 연동용 인터페이스
+- `domtree.llm_tree`: 휴리스틱 LLM 트리 생성기 + Ollama 기반 LLaMA 3.2 Vision 11B 연동 구현 (`OllamaVisionLLMTreeGenerator`), 기타 LLM 연동을 위한 인터페이스
 - `domtree.metrics`: TED, 계층 F1, 구조적 유사도, 읽기 순서 정렬, 불일치 패턴 분류 등 핵심 메트릭
 - `domtree.pipeline`: 전체 파이프라인 오케스트레이션, 배치 처리, 시각화, 요약 통계
 - `domtree.visualization`: 네트워크 그래프 기반 트리/비교 시각화
@@ -140,6 +140,7 @@ domtree batch urls.txt
 | `_CAPTURE_SETTINGS` | `wait_after_load=1.0`, `max_scroll_steps=40` | 렌더링 대기 시간, 자동 스크롤 수행 횟수 |
 | `_HUMAN_SETTINGS` | `min_text_length=20`, `restrict_to_viewport=True` | Human Tree에 포함할 최소 텍스트 길이, 뷰포트 필터링 여부 |
 | `_LLM_SETTINGS` | `max_depth=4`, `max_children=6` | 휴리스틱 LLM Tree의 최대 깊이/자식 수 |
+| CLI 옵션 | `--llm-backend=ollama` (기본), `--ollama-endpoint`, `--ollama-model` | LLM 백엔드를 선택하거나 Ollama 접속 정보를 변경 |
 
 필요한 값을 `src/domtree/cli.py`에서 직접 수정한 뒤 CLI를 실행하면 변경사항이 즉시 적용됩니다.
 
@@ -178,9 +179,30 @@ domtree batch urls.txt
    print(result.metrics)
    ```
 
-   - 프롬프트는 기본적으로 Human Tree 스키마(JSON) 출력을 요구하도록 구성되어 있습니다.
+   - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
    - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
    - Ollama 응답이 JSON 형식을 따르지 않으면 예외가 발생하므로, 필요하면 후처리/재시도 로직을 더할 수 있습니다.
+
+3. **CLI에서 사용**
+
+   ```bash
+   # 기본값(ollama backend)을 그대로 사용
+   domtree analyze https://ko.wikipedia.org/wiki/파이썬
+
+   # Heuristic LLM 트리로 테스트하고 싶다면
+   domtree analyze https://example.com --llm-backend heuristic
+
+   # Ollama 서버가 다른 포트에 있다면
+   domtree analyze https://example.com \
+       --ollama-endpoint http://myhost:12000/api/chat \
+       --ollama-model llama3.2-vision:11b
+   ```
+
+### 향후 ChatGPT API 연동 시
+
+- `LLMTreeGenerator`를 상속하는 `ChatGPTLLMTreeGenerator`(예시 이름)를 작성해 OpenAI API 호출 코드를 구현합니다.
+- 프롬프트는 README에 정의된 JSON 스키마를 그대로 요구해야 하며, 응답을 `TreeNode.from_dict()`로 역직렬화합니다.
+- CLI에 `--llm-backend chatgpt` 옵션과 API 키/모델 이름을 받을 파라미터를 추가하면 빠르게 전환할 수 있습니다.
 
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`
