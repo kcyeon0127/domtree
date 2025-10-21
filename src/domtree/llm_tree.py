@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -159,6 +160,8 @@ Rules:
 - Keep reading_order sequential within the visible flow (left to right, top to bottom).
 - If unsure about text, leave text_preview empty instead of guessing.
 Return nothing except the JSON.
+Return a single JSON object without code fences.
+Do NOT output schema examples, placeholders (e.g., "zone|section|..."), or explanatory text.
 
 """.strip()
 
@@ -171,6 +174,17 @@ class OllamaVisionOptions:
     temperature: float = 0.1
     max_tokens: int = 2048
     response_format: Optional[str] = "json"
+    max_retries: int = 3
+    template_markers: tuple[str, ...] = (
+        "|section|",
+        "zone|section|paragraph|list|table|figure",
+        "main|sidebar",
+        "optional heading",
+        "schema",
+        "template",
+        "example",
+        "placeholder",
+    )
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -183,13 +197,66 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if not request.screenshot_path.exists():
             raise FileNotFoundError(f"Screenshot not found: {request.screenshot_path}")
 
-        prompt = self.options.prompt_template
-
         image_b64 = self._encode_image(request.screenshot_path)
-        response = self._call_ollama(prompt, image_b64)
-        tree = self._parse_response(response)
-        self._attach_raw_response(tree, response)
-        return tree
+        base_prompt = request.prompt or self.options.prompt_template
+        corrections: list[str] = [self._negative_guards()]
+        last_response = ""
+        last_reason = "json_decode"
+
+        for attempt in range(1, self.options.max_retries + 1):
+            full_prompt = self._compose_prompt(base_prompt, corrections)
+            response = self._call_ollama(full_prompt, image_b64)
+            last_response = response
+
+            if self._looks_like_template_text(response):
+                logger.debug("Attempt %s: template-like response detected", attempt)
+                corrections.append(self._template_feedback())
+                last_reason = "template_detected"
+                continue
+
+            try:
+                data = self._extract_json_dict(response)
+            except ValueError as exc:
+                logger.debug("Attempt %s: JSON decode failed (%s)", attempt, exc)
+                corrections.append(self._json_fix_feedback(str(exc)))
+                last_reason = "json_decode"
+                continue
+
+            if self._looks_like_template_json(data):
+                logger.debug("Attempt %s: JSON contains template markers", attempt)
+                corrections.append(self._template_feedback())
+                last_reason = "template_detected"
+                continue
+
+            try:
+                self._validate_tree_dict(data)
+            except ValueError as exc:
+                logger.debug("Attempt %s: JSON schema validation failed (%s)", attempt, exc)
+                corrections.append(self._validation_feedback(str(exc)))
+                last_reason = "schema_validation"
+                continue
+
+            tree = TreeNode.from_dict(data)
+            self._attach_raw_response(
+                tree,
+                response,
+                attempts=attempt,
+                prompt_hash=self._hash_prompt(full_prompt),
+                status="ok",
+            )
+            return tree
+
+        logger.warning("Ollama Vision failed after %s attempts: %s", self.options.max_retries, last_reason)
+        error_tree = self._build_error_tree(last_response, reason=last_reason, attempts=self.options.max_retries)
+        final_prompt = self._compose_prompt(base_prompt, corrections)
+        self._attach_raw_response(
+            error_tree,
+            last_response,
+            attempts=self.options.max_retries,
+            prompt_hash=self._hash_prompt(final_prompt),
+            status=last_reason,
+        )
+        return error_tree
 
     def _encode_image(self, path: Path) -> str:
         with path.open("rb") as handle:
@@ -218,18 +285,14 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             raise ValueError(f"Unexpected Ollama response: {data}")
         return raw_text
 
-    def _parse_response(self, raw_text: str) -> TreeNode:
+    def _extract_json_dict(self, raw_text: str) -> dict:
         for candidate in self._candidate_json_strings(raw_text):
             try:
-                data = json.loads(candidate)
+                return json.loads(candidate)
             except json.JSONDecodeError:
                 continue
-            else:
-                return TreeNode.from_dict(data)
-
         preview = raw_text[:200].replace("\n", " ")
-        logger.warning("Ollama response could not be parsed as JSON: %s...", preview)
-        return self._build_error_tree(raw_text)
+        raise ValueError(f"Failed to decode JSON from response: {preview}...")
 
     def _candidate_json_strings(self, raw_text: str) -> Iterable[str]:
         text = raw_text.strip()
@@ -260,18 +323,36 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             return None
         return text[start : end + 1].strip()
 
-    def _attach_raw_response(self, tree: TreeNode, raw_text: str) -> None:
+    def _attach_raw_response(
+        self,
+        tree: TreeNode,
+        raw_text: str,
+        *,
+        attempts: int,
+        prompt_hash: str,
+        status: str,
+    ) -> None:
         preview = self._truncate(raw_text)
-        tree.metadata.notes.setdefault("llm", {})
-        tree.metadata.notes["llm"]["raw_response_preview"] = preview
+        notes = tree.metadata.notes.setdefault("llm", {})
+        notes.setdefault("status", status)
+        notes["raw_response_preview"] = preview
+        notes["attempts"] = attempts
+        notes["prompt_hash"] = prompt_hash
         tree.attributes.setdefault("llm", {})
-        tree.attributes["llm"]["raw_response"] = raw_text
+        tree.attributes["llm"].update(
+            {
+                "raw_response": raw_text,
+                "prompt_hash": prompt_hash,
+                "attempts": attempts,
+            }
+        )
 
-    def _build_error_tree(self, raw_text: str) -> TreeNode:
+    def _build_error_tree(self, raw_text: str, *, reason: str, attempts: int) -> TreeNode:
         notes = {
             "llm": {
                 "error": "invalid_json",
-                "raw_response_preview": self._truncate(raw_text),
+                "reason": reason,
+                "attempts": attempts,
             }
         }
         metadata = NodeMetadata(
@@ -282,6 +363,86 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         )
         attributes = {"llm": {"raw_response": raw_text}}
         return TreeNode(name="llm_error", label="LLM Parse Failure", metadata=metadata, attributes=attributes)
+
+    def _looks_like_template_text(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(marker in lowered for marker in self.options.template_markers)
+
+    def _looks_like_template_json(self, data) -> bool:
+        if isinstance(data, dict):
+            for value in data.values():
+                if self._looks_like_template_json(value):
+                    return True
+        elif isinstance(data, list):
+            return any(self._looks_like_template_json(item) for item in data)
+        elif isinstance(data, str):
+            return self._contains_marker(data)
+        return False
+
+    def _contains_marker(self, value: str) -> bool:
+        lowered = value.lower()
+        return any(marker in lowered for marker in self.options.template_markers)
+
+    def _validate_tree_dict(self, data: dict) -> None:
+        if not isinstance(data, dict):
+            raise ValueError("Root must be a JSON object")
+        for key in ("name", "metadata", "children"):
+            if key not in data:
+                raise ValueError(f"Missing required field '{key}'")
+        name = data["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Each node requires a non-empty 'name' string")
+        if self._contains_marker(name):
+            raise ValueError("Node name contains placeholder markers")
+
+        metadata = data["metadata"]
+        if not isinstance(metadata, dict):
+            raise ValueError("'metadata' must be an object")
+        node_type = metadata.get("type")
+        if not isinstance(node_type, str) or not node_type.strip():
+            raise ValueError("'metadata.type' must be a non-empty string")
+        if self._contains_marker(node_type):
+            raise ValueError("'metadata.type' contains placeholder markers")
+
+        children = data["children"]
+        if not isinstance(children, list):
+            raise ValueError("'children' must be an array")
+
+        for child in children:
+            self._validate_tree_dict(child)
+
+    def _negative_guards(self) -> str:
+        return (
+            "\n\nSYSTEM RULES:\n"
+            "Return ONE valid JSON object only.\n"
+            "Do NOT include code fences, explanations, schemas, or placeholders such as 'zone|section|...'.\n"
+            "Use concrete values extracted from the screenshot."
+        )
+
+    @staticmethod
+    def _template_feedback() -> str:
+        return (
+            "\n\nSYSTEM CORRECTION: You returned a schema/template. Output actual JSON data only with real observations from the screenshot."
+        )
+
+    @staticmethod
+    def _json_fix_feedback(error: str) -> str:
+        return (
+            f"\n\nSYSTEM CORRECTION: The previous output was not valid JSON ({error}). Return a single JSON object only, no comments or prose."
+        )
+
+    @staticmethod
+    def _validation_feedback(error: str) -> str:
+        return (
+            f"\n\nSYSTEM CORRECTION: The JSON missed required fields ({error}). Include actual node data with 'name', 'metadata', and 'children'."
+        )
+
+    def _compose_prompt(self, base_prompt: str, corrections: Iterable[str]) -> str:
+        return base_prompt + "".join(corrections)
+
+    @staticmethod
+    def _hash_prompt(prompt: str) -> str:
+        return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
     def _truncate(text: str, *, limit: int = 1200) -> str:

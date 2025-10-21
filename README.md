@@ -16,6 +16,7 @@
 - 실행 결과물이 자동으로 저장되는 기본 경로 설명을 보강해 `--visualize-dir`, `--output-json` 없이도 PNG/JSON이 생성된다는 점을 명확히 했습니다.
 - Ollama Vision 응답이 서술형 텍스트로 반환되더라도 JSON 블록을 추출해 파싱하도록 보강하고, `format="json"` 옵션으로 JSON 출력 준수를 강제했습니다.
 - JSON 파싱에 실패하더라도 `llm_error` 노드를 반환해 파이프라인이 중단되지 않고, `llm_tree.json`에 원본 응답(`attributes.llm.raw_response`)과 요약이 기록되도록 했습니다.
+- 템플릿/스키마 응답을 자동 감지해 최대 3회까지 재시도하며, 각 재시도 프롬프트에 교정 메시지를 삽입하고 실패 사유·프롬프트 해시·시도 횟수를 메타데이터로 남기도록 강화했습니다.
 
 ## 빠른 시작
 ```bash
@@ -179,9 +180,10 @@ domtree batch urls.txt
    options = OllamaVisionOptions(
        endpoint="http://localhost:11434/api/generate",
        model="llama3.2-vision:11b",
+       max_retries=3,
        # 필요 시 response_format=None 으로 해제 가능
        # response_format="json" 이면 Ollama가 JSON 출력을 보장하려 시도
-   )
+    )
 
    analyzer = DomTreeAnalyzer(
        llm_generator=OllamaVisionLLMTreeGenerator(options=options)
@@ -194,8 +196,28 @@ domtree batch urls.txt
    - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
    - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
    - 기본적으로 `format="json"`이 설정되어, 모델이 JSON만 반환하도록 강제합니다. 그래도 서술형 텍스트가 섞여 나오면 코드가 자동으로 JSON 블록을 추출해 파싱합니다.
-   - JSON을 끝내 파싱하지 못하면 `llm_error` 루트 노드로 대체하여 분석이 계속되고, `llm_tree.json` → `attributes.llm.raw_response`에 원본 응답이 그대로 저장됩니다.
-   - Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
+   - 템플릿(예: `"zone|section|..."`, `"optional heading"`)을 감지하면 자동으로 재시도하며, 누락 필드가 발견되면 교정 지침을 추가해 다시 요청합니다.
+   - JSON을 끝내 파싱하지 못하면 `llm_error` 루트 노드로 대체하여 분석이 계속되고, `llm_tree.json` → `attributes.llm.raw_response`에 원본 응답과 프롬프트 해시가 그대로 저장됩니다.
+- Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
+
+### LLM 응답 안정화 전략
+- **강제 JSON 모드**: `format="json"`을 기본 활성화해 모델이 JSON만 돌려주도록 요청합니다.
+- **네거티브 가드**: 시스템 규칙에 “구체 값만, 스키마/코드펜스 금지” 문구를 강하게 삽입했습니다.
+- **템플릿 감지 & 교정 프롬프트**: `zone|section|…`, `optional heading` 등 마커가 감지되면 “스키마가 아닌 실제 데이터를 출력하라”는 교정 메시지를 추가해 재시도합니다.
+- **간이 스키마 검증**: `name`, `metadata.type`, `children`이 비어 있거나 플레이스홀더가 포함되면 실패로 간주하고 교정 후 재요청합니다.
+- **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
+- `max_retries`나 `template_markers`는 `OllamaVisionOptions` 인자로 조정할 수 있습니다.
+- **커스터마이징 예시**:
+  ```python
+  options = OllamaVisionOptions(
+      max_retries=5,
+      template_markers=(
+          "zone|section|paragraph|list|table|figure",
+          "optional heading",
+          "placeholder",
+      ),
+  )
+  ```
 
 3. **CLI에서 사용**
 
