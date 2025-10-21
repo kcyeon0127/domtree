@@ -198,9 +198,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             "messages": [
                 {
                     "role": "system",
-                    "content": [
-                        {"type": "text", "text": "You return only JSON with the specified schema."}
-                    ],
+                    "content": "You return only JSON with the specified schema.",
                 },
                 {
                     "role": "user",
