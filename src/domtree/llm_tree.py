@@ -14,6 +14,7 @@ import base64
 import json
 import requests
 
+from bs4 import BeautifulSoup
 from jsonschema import Draft7Validator, ValidationError
 
 from PIL import Image
@@ -206,6 +207,13 @@ class OllamaVisionOptions:
         "\"attributes\": null",
         '"text":',
     )
+
+
+@dataclasses.dataclass
+class OllamaVisionDomOptions(OllamaVisionOptions):
+    max_dom_chars: int = 2000
+    max_sections: int = 40
+    paragraphs_per_section: int = 2
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -475,3 +483,58 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if len(text) <= limit:
             return text
         return text[: limit - 3] + "..."
+
+
+class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
+    """Generate trees using screenshot plus viewport DOM summary as context."""
+
+    def __init__(self, options: Optional[OllamaVisionDomOptions] = None):
+        super().__init__(options)
+        self.options: OllamaVisionDomOptions = options or OllamaVisionDomOptions()
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        html = request.html
+        if not html:
+            return super().generate(request)
+
+        summary = self._summarize_dom(html)
+        dom_prompt = (
+            self.options.prompt_template
+            + "\n\nDOM SUMMARY (viewport approximation):\n"
+            + summary
+        )
+        patched_request = dataclasses.replace(request, prompt=dom_prompt)
+        return super().generate(patched_request)
+
+    def _summarize_dom(self, html: str) -> str:
+        soup = BeautifulSoup(html, "lxml")
+        body = soup.body or soup
+        lines: list[str] = []
+
+        headings = body.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
+        for heading in headings[: self.options.max_sections]:
+            text = heading.get_text(" ", strip=True)
+            if not text:
+                continue
+            level = heading.name.upper()
+            lines.append(f"{level}: {text}")
+
+            if self.options.paragraphs_per_section <= 0:
+                continue
+            collected = 0
+            sibling = heading.find_next_sibling()
+            while sibling and collected < self.options.paragraphs_per_section:
+                sibling_name = getattr(sibling, "name", "").lower() if getattr(sibling, "name", None) else ""
+                if sibling_name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                    break
+                snippet = sibling.get_text(" ", strip=True) if getattr(sibling, "get_text", None) else str(sibling).strip()
+                if snippet:
+                    lines.append(f"- {snippet}")
+                    collected += 1
+                sibling = sibling.find_next_sibling()
+
+        summary = "\n".join(lines)
+        max_chars = max(256, self.options.max_dom_chars)
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3] + "..."
+        return summary or "(No visible DOM text extracted)"

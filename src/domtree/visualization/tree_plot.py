@@ -134,7 +134,12 @@ def plot_tree(
 
     fig, ax = plt.subplots(figsize=figsize)
     nx.draw_networkx_nodes(graph, pos, node_size=node_size, node_color="#90caf9", ax=ax)
-    nx.draw_networkx_edges(graph, pos, arrows=arrows, arrowstyle="-|>", arrowsize=10, ax=ax)
+    edge_kwargs = {"ax": ax}
+    if arrows:
+        edge_kwargs.update({"arrows": True, "arrowstyle": "-|>", "arrowsize": 10})
+    else:
+        edge_kwargs["arrows"] = False
+    nx.draw_networkx_edges(graph, pos, **edge_kwargs)
     label_kwargs = {"font_size": font_size, "ax": ax}
     if _FONT_STACK:
         label_kwargs["font_family"] = _FONT_STACK

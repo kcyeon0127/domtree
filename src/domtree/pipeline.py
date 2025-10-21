@@ -27,9 +27,12 @@ class AnalysisResult:
     llm_tree: TreeNode
     zone_comparison: ComparisonResult
     heading_comparison: ComparisonResult
+    llm_dom_tree: TreeNode | None = None
+    zone_dom_comparison: ComparisonResult | None = None
+    heading_dom_comparison: ComparisonResult | None = None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "url": self.url,
             "screenshot_path": str(self.screenshot_path),
             "html_path": str(self.html_path),
@@ -42,6 +45,12 @@ class AnalysisResult:
                 "heading": self.heading_comparison.metrics.mismatch_patterns,
             },
         }
+        if self.zone_dom_comparison and self.heading_dom_comparison:
+            payload["metrics"]["zone_dom"] = self.zone_dom_comparison.metrics.flat()
+            payload["metrics"]["heading_dom"] = self.heading_dom_comparison.metrics.flat()
+            payload["mismatch_patterns"]["zone_dom"] = self.zone_dom_comparison.metrics.mismatch_patterns
+            payload["mismatch_patterns"]["heading_dom"] = self.heading_dom_comparison.metrics.mismatch_patterns
+        return payload
 
 
 class DomTreeAnalyzer:
@@ -51,18 +60,33 @@ class DomTreeAnalyzer:
         capture_options: Optional[CaptureOptions] = None,
         human_options: Optional[HumanTreeOptions] = None,
         llm_generator: Optional[LLMTreeGenerator] = None,
+        dom_llm_generator: Optional[LLMTreeGenerator] = None,
     ):
         self.capture_options = capture_options or CaptureOptions()
         self.human_options = human_options or HumanTreeOptions()
         self.llm_generator = llm_generator or HeuristicLLMTreeGenerator()
+        self.dom_llm_generator = dom_llm_generator
 
     def analyze_url(self, url: str, *, name: Optional[str] = None) -> AnalysisResult:
         capture = capture_page(url, options=self.capture_options, name=name)
         html = Path(capture["html_path"]).read_text(encoding="utf-8")
         human_trees = HumanTreeExtractor(html, url=url, options=self.human_options).extract()
-        llm_tree = self.llm_generator.generate(LLMTreeRequest(screenshot_path=Path(capture["screenshot_path"]), html=html))
+        llm_tree = self.llm_generator.generate(
+            LLMTreeRequest(screenshot_path=Path(capture["screenshot_path"]), html=html)
+        )
         zone_comparison = compute_comparison(human_trees.zone_tree, llm_tree)
         heading_comparison = compute_comparison(human_trees.heading_tree, llm_tree)
+
+        llm_dom_tree = None
+        zone_dom_comparison = None
+        heading_dom_comparison = None
+        if self.dom_llm_generator is not None:
+            dom_tree = self.dom_llm_generator.generate(
+                LLMTreeRequest(screenshot_path=Path(capture["screenshot_path"]), html=html)
+            )
+            llm_dom_tree = dom_tree
+            zone_dom_comparison = compute_comparison(human_trees.zone_tree, dom_tree)
+            heading_dom_comparison = compute_comparison(human_trees.heading_tree, dom_tree)
         return AnalysisResult(
             url=url,
             screenshot_path=Path(capture["screenshot_path"]),
@@ -72,14 +96,30 @@ class DomTreeAnalyzer:
             llm_tree=llm_tree,
             zone_comparison=zone_comparison,
             heading_comparison=heading_comparison,
+            llm_dom_tree=llm_dom_tree,
+            zone_dom_comparison=zone_dom_comparison,
+            heading_dom_comparison=heading_dom_comparison,
         )
 
     def analyze_offline(self, *, html_path: Path, screenshot_path: Path, url: str = "offline") -> AnalysisResult:
         html = html_path.read_text(encoding="utf-8")
         human_trees = HumanTreeExtractor(html, url=url, options=self.human_options).extract()
-        llm_tree = self.llm_generator.generate(LLMTreeRequest(screenshot_path=screenshot_path, html=html))
+        llm_tree = self.llm_generator.generate(
+            LLMTreeRequest(screenshot_path=screenshot_path, html=html)
+        )
         zone_comparison = compute_comparison(human_trees.zone_tree, llm_tree)
         heading_comparison = compute_comparison(human_trees.heading_tree, llm_tree)
+
+        llm_dom_tree = None
+        zone_dom_comparison = None
+        heading_dom_comparison = None
+        if self.dom_llm_generator is not None:
+            dom_tree = self.dom_llm_generator.generate(
+                LLMTreeRequest(screenshot_path=screenshot_path, html=html)
+            )
+            llm_dom_tree = dom_tree
+            zone_dom_comparison = compute_comparison(human_trees.zone_tree, dom_tree)
+            heading_dom_comparison = compute_comparison(human_trees.heading_tree, dom_tree)
         return AnalysisResult(
             url=url,
             screenshot_path=screenshot_path,
@@ -89,6 +129,9 @@ class DomTreeAnalyzer:
             llm_tree=llm_tree,
             zone_comparison=zone_comparison,
             heading_comparison=heading_comparison,
+            llm_dom_tree=llm_dom_tree,
+            zone_dom_comparison=zone_dom_comparison,
+            heading_dom_comparison=heading_dom_comparison,
         )
 
     def run_batch(self, urls: Sequence[str]) -> List[AnalysisResult]:
@@ -103,10 +146,16 @@ class DomTreeAnalyzer:
         return results
 
     def summarize(self, analyses: Iterable[AnalysisResult]) -> dict:
+        analyses = list(analyses)
         zone_metrics: List[dict] = []
         heading_metrics: List[dict] = []
         zone_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
         heading_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
+
+        zone_dom_metrics: List[dict] = []
+        heading_dom_metrics: List[dict] = []
+        zone_dom_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
+        heading_dom_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
 
         for analysis in analyses:
             zflat = analysis.zone_comparison.metrics.flat()
@@ -126,6 +175,24 @@ class DomTreeAnalyzer:
             heading_mismatch["depth_shift"] += hm["depth_shift"]["count"]
             heading_mismatch["order"] += hm["reading_order"]["gaps"]
 
+            if analysis.zone_dom_comparison and analysis.heading_dom_comparison:
+                zdom = analysis.zone_dom_comparison.metrics.flat()
+                hdom = analysis.heading_dom_comparison.metrics.flat()
+                zone_dom_metrics.append(zdom)
+                heading_dom_metrics.append(hdom)
+
+                zdm = analysis.zone_dom_comparison.metrics.mismatch_patterns
+                hdm = analysis.heading_dom_comparison.metrics.mismatch_patterns
+                zone_dom_mismatch["missing"] += zdm["missing_nodes"]["count"]
+                zone_dom_mismatch["extra"] += zdm["extra_nodes"]["count"]
+                zone_dom_mismatch["depth_shift"] += zdm["depth_shift"]["count"]
+                zone_dom_mismatch["order"] += zdm["reading_order"]["gaps"]
+
+                heading_dom_mismatch["missing"] += hdm["missing_nodes"]["count"]
+                heading_dom_mismatch["extra"] += hdm["extra_nodes"]["count"]
+                heading_dom_mismatch["depth_shift"] += hdm["depth_shift"]["count"]
+                heading_dom_mismatch["order"] += hdm["reading_order"]["gaps"]
+
         def _average(metrics_list: List[dict]) -> dict:
             if not metrics_list:
                 return {}
@@ -135,7 +202,7 @@ class DomTreeAnalyzer:
                 for key in keys
             }
 
-        return {
+        summary = {
             "zone": {
                 "average_metrics": _average(zone_metrics),
                 "mismatch_totals": zone_mismatch,
@@ -148,6 +215,20 @@ class DomTreeAnalyzer:
             },
         }
 
+        if zone_dom_metrics and heading_dom_metrics:
+            summary["zone_dom"] = {
+                "average_metrics": _average(zone_dom_metrics),
+                "mismatch_totals": zone_dom_mismatch,
+                "count": len(zone_dom_metrics),
+            }
+            summary["heading_dom"] = {
+                "average_metrics": _average(heading_dom_metrics),
+                "mismatch_totals": heading_dom_mismatch,
+                "count": len(heading_dom_metrics),
+            }
+
+        return summary
+
     def visualize(
         self,
         analysis: AnalysisResult,
@@ -157,14 +238,45 @@ class DomTreeAnalyzer:
         zone_path: Optional[Path] = None,
         heading_path: Optional[Path] = None,
         llm_path: Optional[Path] = None,
+        zone_dom_side_by_side_path: Optional[Path] = None,
+        heading_dom_side_by_side_path: Optional[Path] = None,
+        llm_dom_path: Optional[Path] = None,
     ) -> None:
         if zone_side_by_side_path:
-            plot_side_by_side(analysis.zone_comparison.human_tree, analysis.llm_tree, path=zone_side_by_side_path)
+            plot_side_by_side(
+                analysis.zone_comparison.human_tree,
+                analysis.zone_comparison.llm_tree,
+                path=zone_side_by_side_path,
+            )
         if heading_side_by_side_path:
-            plot_side_by_side(analysis.heading_comparison.human_tree, analysis.llm_tree, path=heading_side_by_side_path)
+            plot_side_by_side(
+                analysis.heading_comparison.human_tree,
+                analysis.heading_comparison.llm_tree,
+                path=heading_side_by_side_path,
+            )
         if zone_path:
             plot_tree(analysis.human_zone_tree, title="Human Zone Tree", path=zone_path)
         if heading_path:
             plot_tree(analysis.human_heading_tree, title="Human Heading Tree", path=heading_path)
         if llm_path:
-            plot_tree(analysis.llm_tree, title="LLM Tree", path=llm_path)
+            plot_tree(analysis.llm_tree, title="LLM Tree (Vision)", path=llm_path)
+
+        if (
+            analysis.zone_dom_comparison
+            and analysis.heading_dom_comparison
+            and analysis.llm_dom_tree is not None
+        ):
+            if zone_dom_side_by_side_path:
+                plot_side_by_side(
+                    analysis.zone_dom_comparison.human_tree,
+                    analysis.zone_dom_comparison.llm_tree,
+                    path=zone_dom_side_by_side_path,
+                )
+            if heading_dom_side_by_side_path:
+                plot_side_by_side(
+                    analysis.heading_dom_comparison.human_tree,
+                    analysis.heading_dom_comparison.llm_tree,
+                    path=heading_dom_side_by_side_path,
+                )
+            if llm_dom_path:
+                plot_tree(analysis.llm_dom_tree, title="LLM Tree (Vision + DOM)", path=llm_dom_path)

@@ -17,6 +17,8 @@ from .human_tree import HumanTreeOptions
 from .llm_tree import (
     HeuristicLLMOptions,
     HeuristicLLMTreeGenerator,
+    OllamaVisionDomLLMTreeGenerator,
+    OllamaVisionDomOptions,
     OllamaVisionLLMTreeGenerator,
     OllamaVisionOptions,
 )
@@ -48,34 +50,45 @@ _OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 _OLLAMA_MODEL = "llama3.2-vision:11b"
 
 
-def _create_llm_generator(min_text_length: int):
+def _create_llm_generators(min_text_length: int):
     backend = _LLM_BACKEND.lower()
     if backend == "ollama":
-        return OllamaVisionLLMTreeGenerator(
+        vision = OllamaVisionLLMTreeGenerator(
             options=OllamaVisionOptions(
                 endpoint=_OLLAMA_ENDPOINT,
                 model=_OLLAMA_MODEL,
             )
         )
+        dom = OllamaVisionDomLLMTreeGenerator(
+            options=OllamaVisionDomOptions(
+                endpoint=_OLLAMA_ENDPOINT,
+                model=_OLLAMA_MODEL,
+            )
+        )
+        return vision, dom
     if backend == "heuristic":
-        return HeuristicLLMTreeGenerator(
+        generator = HeuristicLLMTreeGenerator(
             options=HeuristicLLMOptions(
                 max_depth=_LLM_SETTINGS["max_depth"],
                 max_children=_LLM_SETTINGS["max_children"],
                 human_tree_options=HumanTreeOptions(min_text_length=min_text_length),
             )
         )
+        return generator, None
     raise ValueError(f"Unsupported llm backend: {backend}")
 
 
 def _create_analyzer() -> DomTreeAnalyzer:
     capture_options = CaptureOptions(**_CAPTURE_SETTINGS)
     human_options = HumanTreeOptions(**_HUMAN_SETTINGS)
-    llm_generator = _create_llm_generator(min_text_length=_HUMAN_SETTINGS["min_text_length"])
+    llm_generator, dom_llm_generator = _create_llm_generators(
+        min_text_length=_HUMAN_SETTINGS["min_text_length"]
+    )
     return DomTreeAnalyzer(
         capture_options=capture_options,
         human_options=human_options,
         llm_generator=llm_generator,
+        dom_llm_generator=dom_llm_generator,
     )
 
 
@@ -107,6 +120,8 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
     # Backwards compatibility: keep legacy filename pointing to zone tree
     (run_dir / "human_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_dom_tree is not None:
+        (run_dir / "llm_dom_tree.json").write_text(result.llm_dom_tree.to_json(indent=2), encoding="utf-8")
     analyzer.visualize(
         result,
         zone_side_by_side_path=run_dir / "comparison_zone.png",
@@ -114,6 +129,9 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
         zone_path=run_dir / "human_zone.png",
         heading_path=run_dir / "human_heading.png",
         llm_path=run_dir / "llm.png",
+        zone_dom_side_by_side_path=run_dir / "comparison_zone_dom.png",
+        heading_dom_side_by_side_path=run_dir / "comparison_heading_dom.png",
+        llm_dom_path=run_dir / "llm_dom.png",
     )
     # Legacy filenames for downstream compatibility
     zone_comparison = run_dir / "comparison_zone.png"
@@ -151,9 +169,13 @@ def analyze_offline(
 ) -> None:
     """Run analysis for pre-downloaded HTML and screenshot files."""
 
+    llm_generator, dom_llm_generator = _create_llm_generators(
+        min_text_length=_HUMAN_SETTINGS["min_text_length"]
+    )
     analyzer = DomTreeAnalyzer(
         human_options=HumanTreeOptions(**_HUMAN_SETTINGS),
-        llm_generator=_create_llm_generator(min_text_length=_HUMAN_SETTINGS["min_text_length"]),
+        llm_generator=llm_generator,
+        dom_llm_generator=dom_llm_generator,
     )
     label = identifier or html_path.stem
     result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)
