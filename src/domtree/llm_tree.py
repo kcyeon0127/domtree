@@ -148,11 +148,17 @@ You MUST return ONE valid JSON object that strictly follows the JSON Schema belo
 JSON Schema (do not modify):
 {SCHEMA_PROMPT_TEXT}
 
+Structural requirements:
+- Create explicit zones for main content, sidebar, navigation, footer, etc. if visible.
+- Within each zone, add sections that correspond to headings or visually distinct blocks.
+- Under each section, include paragraph/list/table/figure nodes for major content blocks. Avoid collapsing multiple paragraphs into one node.
+- Include reading_order for every node in visible order (top-left → bottom-right).
+- When lists or tables are visible, represent them as separate nodes with suitable children if necessary.
+- Aim to capture at least 20 nodes when the screenshot contains sufficient content.
+
 Rules:
-- Focus on what is visible in the screenshot. Ignore off-screen DOM sections.
-- Create 1..N root-level zones (main content, sidebar, navigation, etc.).
-- Under zones, add sections (heading hierarchy) and content blocks (paragraph, list, table, figure).
-- Keep reading_order sequential within the visible flow (left to right, top to bottom).
+- Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
+- Use concrete text snippets from the screenshot (truncate sensibly) or leave fields empty if unreadable.
 - If unsure about text, leave text_preview empty instead of guessing.
 
 Return nothing except the JSON.
@@ -180,6 +186,7 @@ class OllamaVisionOptions:
         "example",
         "placeholder",
     )
+    min_total_nodes: int = 20
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -231,6 +238,18 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 last_reason = "schema_validation"
                 continue
 
+            node_count = self._count_nodes(data)
+            if node_count < self.options.min_total_nodes:
+                logger.debug(
+                    "Attempt %s: Tree too small (%s nodes < min %s)",
+                    attempt,
+                    node_count,
+                    self.options.min_total_nodes,
+                )
+                corrections.append(self._detail_feedback(node_count))
+                last_reason = "insufficient_detail"
+                continue
+
             tree = TreeNode.from_dict(data)
             self._attach_raw_response(
                 tree,
@@ -239,10 +258,16 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
                 prompt_hash=self._hash_prompt(full_prompt),
                 status="ok",
             )
+            tree.metadata.notes.setdefault("llm", {})
+            tree.metadata.notes["llm"]["node_count"] = node_count
             return tree
 
         logger.warning("Ollama Vision failed after %s attempts: %s", self.options.max_retries, last_reason)
-        error_tree = self._build_error_tree(last_response, reason=last_reason, attempts=self.options.max_retries)
+        error_tree = self._build_error_tree(
+            last_response,
+            reason=last_reason,
+            attempts=self.options.max_retries,
+        )
         final_prompt = self._compose_prompt(base_prompt, corrections)
         self._attach_raw_response(
             error_tree,
@@ -389,7 +414,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             "\n\nSYSTEM RULES:\n"
             "Return ONE valid JSON object only.\n"
             "Do NOT include code fences, explanations, schemas, or placeholders such as 'zone|section|...'.\n"
-            "Use concrete values extracted from the screenshot."
+            "Use concrete values extracted from the screenshot.\n"
+            "Represent every major visible block (zones → sections → content nodes)."
         )
 
     @staticmethod
@@ -423,3 +449,20 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if len(text) <= limit:
             return text
         return text[: limit - 3] + "..."
+
+    @staticmethod
+    def _count_nodes(data: dict) -> int:
+        count = 1
+        children = data.get("children", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    count += OllamaVisionLLMTreeGenerator._count_nodes(child)
+        return count
+
+    @staticmethod
+    def _detail_feedback(node_count: int) -> str:
+        return (
+            f"\n\nSYSTEM CORRECTION: The previous JSON contained only {node_count} nodes."
+            " Break down the layout into more zones, sections, and paragraph/list/table nodes to capture visible details."
+        )

@@ -32,6 +32,7 @@ _CAPTURE_SETTINGS = {
 
 _HUMAN_SETTINGS = {
     "min_text_length": 20,
+    "restrict_to_viewport": True,
 }
 
 _LLM_SETTINGS = {
