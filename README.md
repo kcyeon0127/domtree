@@ -10,6 +10,12 @@
 - 평가 지표: 트리 편집 거리(TED), 계층 F1, 구조적 유사도, 읽기 순서 정렬(Needleman-Wunsch), 불일치 패턴 분류
 - 배치/리포트: URL 목록 일괄 처리, 요약 통계, CSV/JSON 결과물, 트리 시각화 이미지 출력
 
+## 최근 변경 사항 (2025-10-21)
+- Ollama Vision 연동 기본 엔드포인트를 `/api/generate`로 통일해 400 오류를 방지했습니다 (`src/domtree/cli.py`, `README` 예제).
+- README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.
+- 실행 결과물이 자동으로 저장되는 기본 경로 설명을 보강해 `--visualize-dir`, `--output-json` 없이도 PNG/JSON이 생성된다는 점을 명확히 했습니다.
+- Ollama Vision 응답이 서술형 텍스트로 반환되더라도 JSON 블록을 추출해 파싱하도록 보강하고, `format="json"` 옵션으로 JSON 출력 준수를 강제했습니다.
+
 ## 빠른 시작
 ```bash
 conda activate domtree
@@ -172,6 +178,8 @@ domtree batch urls.txt
    options = OllamaVisionOptions(
        endpoint="http://localhost:11434/api/generate",
        model="llama3.2-vision:11b",
+       # 필요 시 response_format=None 으로 해제 가능
+       # response_format="json" 이면 Ollama가 JSON 출력을 보장하려 시도
    )
 
    analyzer = DomTreeAnalyzer(
@@ -184,7 +192,7 @@ domtree batch urls.txt
 
    - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
    - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
-   - Ollama 응답이 JSON 형식을 따르지 않으면 예외가 발생하므로, 필요하면 후처리/재시도 로직을 더할 수 있습니다.
+   - 기본적으로 `format="json"`이 설정되어, 모델이 JSON만 반환하도록 강제합니다. 그래도 서술형 텍스트가 섞여 나오면 코드가 자동으로 JSON 블록을 추출해 파싱합니다.
    - Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
 
 3. **CLI에서 사용**

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 import base64
 import json
@@ -169,6 +170,7 @@ class OllamaVisionOptions:
     prompt_template: str = DEFAULT_VISION_PROMPT
     temperature: float = 0.1
     max_tokens: int = 2048
+    response_format: Optional[str] = "json"
 
 
 class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
@@ -203,6 +205,9 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             },
         }
 
+        if self.options.response_format:
+            payload["format"] = self.options.response_format
+
         response = requests.post(self.options.endpoint, json=payload, timeout=180)
         response.raise_for_status()
         data = response.json()
@@ -212,9 +217,42 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         return raw_text
 
     def _parse_response(self, raw_text: str) -> TreeNode:
-        try:
-            data = json.loads(raw_text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Failed to decode Ollama JSON response: {raw_text[:200]}...") from exc
+        for candidate in self._candidate_json_strings(raw_text):
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            else:
+                return TreeNode.from_dict(data)
 
-        return TreeNode.from_dict(data)
+        preview = raw_text[:200].replace("\n", " ")
+        raise ValueError(f"Failed to decode Ollama JSON response: {preview}...")
+
+    def _candidate_json_strings(self, raw_text: str) -> Iterable[str]:
+        text = raw_text.strip()
+        candidates = [text]
+
+        if text.startswith("```"):
+            fenced = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+            fenced = re.sub(r"\s*```$", "", fenced).strip()
+            if fenced:
+                candidates.append(fenced)
+
+        brace_candidate = self._extract_braced_json(text)
+        if brace_candidate:
+            candidates.append(brace_candidate)
+
+        # Preserve order while removing duplicates
+        seen = set()
+        for candidate in candidates:
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                yield candidate
+
+    @staticmethod
+    def _extract_braced_json(text: str) -> Optional[str]:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        return text[start : end + 1].strip()
