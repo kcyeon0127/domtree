@@ -16,8 +16,11 @@ conda activate domtree
 pip install -r requirements.txt
 pip install -e .
 playwright install chromium
+playwright install-deps
 ```
 - 최초 1회 환경 생성이 필요하다면 `conda create -n domtree python=3.10`을 먼저 실행하세요.
+- (Linux 환경) 브라우저 실행 의존성: `playwright install-deps`
+- LLaMA 3.2 Vision 사용 시, 별도 터미널에서 Ollama 서버 실행: `ollama serve` (기본 주소 `http://localhost:11434`, 모델은 `ollama pull llama3.2-vision:11b`로 사전 다운로드)
 
 ## 사용 예시
 ### 단일 URL 분석
