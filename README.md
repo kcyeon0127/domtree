@@ -170,7 +170,7 @@ domtree batch urls.txt
    from domtree.llm_tree import OllamaVisionLLMTreeGenerator, OllamaVisionOptions
 
    options = OllamaVisionOptions(
-       endpoint="http://localhost:11403/api/chat",
+       endpoint="http://localhost:11434/api/generate",
        model="llama3.2-vision:11b",
    )
 
@@ -185,6 +185,7 @@ domtree batch urls.txt
    - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
    - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
    - Ollama 응답이 JSON 형식을 따르지 않으면 예외가 발생하므로, 필요하면 후처리/재시도 로직을 더할 수 있습니다.
+   - Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
 
 3. **CLI에서 사용**
 
@@ -205,7 +206,7 @@ domtree batch urls.txt
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`
 - 배치/결과 리포트: 기본 `data/output/` (옵션으로 변경 가능)
-- 시각화 이미지: `--visualize-dir` 또는 사용자 지정 경로
+- 시각화 이미지: 각 실행 디렉터리(`comparison.png`, `human.png`, `llm.png`)에 자동 저장
 
 ## 라이선스
 프로젝트 라이선스는 별도 안내를 참고하거나 담당자에게 문의하세요.

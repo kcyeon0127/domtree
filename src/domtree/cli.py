@@ -42,7 +42,7 @@ _LLM_SETTINGS = {
 _OUTPUT_ROOT = Path("data/output")
 
 _LLM_BACKEND = "ollama"  # options: "ollama" or "heuristic"
-_OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
+_OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 _OLLAMA_MODEL = "llama3.2-vision:11b"
 
 

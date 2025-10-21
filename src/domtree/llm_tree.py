@@ -164,7 +164,7 @@ Return nothing except the JSON.
 
 @dataclasses.dataclass
 class OllamaVisionOptions:
-    endpoint: str = "http://localhost:11403/api/chat"
+    endpoint: str = "http://localhost:11434/api/generate"
     model: str = "llama3.2-vision:11b"
     prompt_template: str = DEFAULT_VISION_PROMPT
     temperature: float = 0.1
@@ -191,23 +191,12 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         with path.open("rb") as handle:
             return base64.b64encode(handle.read()).decode("utf-8")
 
-    def _call_ollama(self, prompt: str, image_b64: str) -> dict:
+    def _call_ollama(self, prompt: str, image_b64: str) -> str:
         payload = {
             "model": self.options.model,
+            "prompt": prompt,
+            "images": [image_b64],
             "stream": False,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You return only JSON with the specified schema.",
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image", "image": image_b64},
-                    ],
-                },
-            ],
             "options": {
                 "temperature": self.options.temperature,
                 "num_predict": self.options.max_tokens,
@@ -217,17 +206,12 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         response = requests.post(self.options.endpoint, json=payload, timeout=180)
         response.raise_for_status()
         data = response.json()
-        if "message" not in data or "content" not in data["message"]:
-            raise ValueError(f"Unexpected Ollama response: {data}")
-        return data["message"]
-
-    def _parse_response(self, message: dict) -> TreeNode:
-        parts = message.get("content", [])
-        texts = [part.get("text", "") for part in parts if part.get("type") == "text"]
-        raw_text = "\n".join(texts).strip()
+        raw_text = data.get("response", "").strip()
         if not raw_text:
-            raise ValueError("Ollama response did not contain text")
+            raise ValueError(f"Unexpected Ollama response: {data}")
+        return raw_text
 
+    def _parse_response(self, raw_text: str) -> TreeNode:
         try:
             data = json.loads(raw_text)
         except json.JSONDecodeError as exc:
