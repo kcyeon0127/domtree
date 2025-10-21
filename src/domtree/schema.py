@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import copy
 
@@ -101,3 +101,60 @@ class NodeMetadata:
             visual_cues=VisualCues(**self.visual_cues.__dict__),
             notes=copy.deepcopy(self.notes),
         )
+
+
+TREE_JSON_SCHEMA: Dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://domtree.dev/schema/node.json",
+    "title": "DomTree Node",
+    "type": "object",
+    "required": ["name", "metadata", "children"],
+    "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "label": {"type": ["string", "null"]},
+        "attributes": {"type": "object"},
+        "metadata": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+                "type": {"type": "string", "minLength": 1},
+                "role": {"type": ["string", "null"]},
+                "text_heading": {"type": ["string", "null"]},
+                "heading_level": {"type": ["integer", "null"]},
+                "reading_order": {"type": ["integer", "null"]},
+                "dom_refs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "vis_cues": {
+                    "type": "object",
+                    "properties": {
+                        "bbox": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 4,
+                            "maxItems": 4,
+                        },
+                        "font_size": {"type": "number"},
+                        "font_weight": {"type": ["string", "null"]},
+                        "margin_top": {"type": ["number", "null"]},
+                        "margin_bottom": {"type": ["number", "null"]},
+                        "bg_color": {"type": ["string", "null"]},
+                        "column": {"type": ["integer", "null"]},
+                    },
+                    "additionalProperties": True,
+                },
+                "text_preview": {"type": ["string", "null"]},
+                "language": {"type": ["string", "null"]},
+                "notes": {"type": "object"},
+            },
+            "additionalProperties": True,
+        },
+        "children": {
+            "type": "array",
+            "items": {"$ref": "#"},
+        },
+        "identifier": {"type": ["string", "null"]},
+    },
+    "additionalProperties": False,
+}

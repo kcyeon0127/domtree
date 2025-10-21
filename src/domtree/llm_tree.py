@@ -14,13 +14,18 @@ import base64
 import json
 import requests
 
+from jsonschema import Draft7Validator, ValidationError
+
 from PIL import Image
 
 from .human_tree import HumanTreeOptions, HumanTreeExtractor
-from .schema import NodeMetadata
+from .schema import NodeMetadata, TREE_JSON_SCHEMA
 from .tree import TreeNode
 
 logger = logging.getLogger(__name__)
+
+SCHEMA_PROMPT_TEXT = json.dumps(TREE_JSON_SCHEMA, ensure_ascii=False, indent=2)
+TREE_JSON_VALIDATOR = Draft7Validator(TREE_JSON_SCHEMA)
 
 
 @dataclasses.dataclass
@@ -135,34 +140,24 @@ class StubLLMTreeGenerator(LLMTreeGenerator):
 
 # --------------------------- Ollama LLaMA vision backend ---------------------------
 
-DEFAULT_VISION_PROMPT = """
+DEFAULT_VISION_PROMPT = f"""
 You are a meticulous document analyst. Using ONLY the provided webpage screenshot (ignore HTML) infer the human-perceived layout.
-Return ONLY valid JSON matching this schema:
-{
-  "name": "zone|section|paragraph|list|table|figure|...",
-  "label": "string",
-  "metadata": {
-    "type": "zone|section|paragraph|list|table|figure",
-    "role": "main|sidebar|nav|toc|ad|body|...",
-    "reading_order": <integer>,
-    "text_heading": "optional heading text",
-    "heading_level": <optional integer>,
-    "text_preview": "optional excerpt",
-    "dom_refs": ["css selector", ...],
-    "vis_cues": {"bbox": [top,left,bottom,right]}
-  },
-  "children": [ ... recursive ... ]
-}
+
+You MUST return ONE valid JSON object that strictly follows the JSON Schema below. Do not include any additional commentary.
+
+JSON Schema (do not modify):
+{SCHEMA_PROMPT_TEXT}
+
 Rules:
 - Focus on what is visible in the screenshot. Ignore off-screen DOM sections.
 - Create 1..N root-level zones (main content, sidebar, navigation, etc.).
 - Under zones, add sections (heading hierarchy) and content blocks (paragraph, list, table, figure).
 - Keep reading_order sequential within the visible flow (left to right, top to bottom).
 - If unsure about text, leave text_preview empty instead of guessing.
+
 Return nothing except the JSON.
 Return a single JSON object without code fences.
 Do NOT output schema examples, placeholders (e.g., "zone|section|..."), or explanatory text.
-
 """.strip()
 
 
@@ -384,32 +379,10 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         return any(marker in lowered for marker in self.options.template_markers)
 
     def _validate_tree_dict(self, data: dict) -> None:
-        if not isinstance(data, dict):
-            raise ValueError("Root must be a JSON object")
-        for key in ("name", "metadata", "children"):
-            if key not in data:
-                raise ValueError(f"Missing required field '{key}'")
-        name = data["name"]
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("Each node requires a non-empty 'name' string")
-        if self._contains_marker(name):
-            raise ValueError("Node name contains placeholder markers")
-
-        metadata = data["metadata"]
-        if not isinstance(metadata, dict):
-            raise ValueError("'metadata' must be an object")
-        node_type = metadata.get("type")
-        if not isinstance(node_type, str) or not node_type.strip():
-            raise ValueError("'metadata.type' must be a non-empty string")
-        if self._contains_marker(node_type):
-            raise ValueError("'metadata.type' contains placeholder markers")
-
-        children = data["children"]
-        if not isinstance(children, list):
-            raise ValueError("'children' must be an array")
-
-        for child in children:
-            self._validate_tree_dict(child)
+        try:
+            TREE_JSON_VALIDATOR.validate(data)
+        except ValidationError as exc:
+            raise ValueError(exc.message)
 
     def _negative_guards(self) -> str:
         return (
@@ -434,7 +407,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
     @staticmethod
     def _validation_feedback(error: str) -> str:
         return (
-            f"\n\nSYSTEM CORRECTION: The JSON missed required fields ({error}). Include actual node data with 'name', 'metadata', and 'children'."
+            f"\n\nSYSTEM CORRECTION: The JSON violated the schema ({error}). Return data that satisfies every required field in the schema."
         )
 
     def _compose_prompt(self, base_prompt: str, corrections: Iterable[str]) -> str:
