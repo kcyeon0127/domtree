@@ -160,13 +160,22 @@ Structural requirements:
 - Aim to capture at least 10 nodes when the screenshot contains sufficient content.
 
 Field requirements:
-- Use the exact field names from the schema (snake_case such as text_heading, heading_level, reading_order, dom_refs, vis_cues, text_preview).
+- Use the exact field names from the schema (snake_case such as `text_heading`, `heading_level`, `reading_order`, `dom_refs`, `vis_cues`, `text_preview`).
 - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
-- Choose descriptive `name`/`type` values derived from the content (e.g., "zone_main", "section_introduction", "paragraph_overview"). Avoid generic placeholders like "top-1".
-- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview` rather than inventing new top-level keys.
-- Do not invent custom top-level keys such as `text`, `content`, or `summary`; follow the schema exactly.
-- Keep JSON concise: limit arrays to at most 5 items and numeric precision to two decimals. For `vis_cues`, provide a single `bbox` array with four numbers (top, left, bottom, right) and omit any `bboxes` collection.
+- Choose descriptive `name`/`type` values derived from the content (예: `zone_main`, `section_introduction`, `paragraph_overview`).
+- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; `dom_refs`와 `vis_cues` 외에는 새 오브젝트를 만들지 마세요.
+- `vis_cues` 예시는 다음과 같습니다.
+  ```json
+  "vis_cues": {
+    "bbox": [120, 0, 400, 1024],
+    "font_size": 16,
+    "font_weight": "bold",
+    "margin_top": 12,
+    "margin_bottom": 8
+  }
+  ```
+- 트리는 최소 3개 이상의 노드를 가져야 합니다. `zone → section → paragraph` 구조를 기본으로 생각하고, 각 노드는 고유한 `reading_order` 값을 갖도록 하세요.
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
@@ -189,13 +198,7 @@ class OllamaVisionOptions:
     max_tokens: int = 4096
     response_format: Optional[str] = "json"
     max_retries: int = 5
-    template_markers: tuple[str, ...] | None = (
-        "|section|",
-        "zone|section|paragraph|list|table|figure",
-        "schema",
-        "template",
-        "placeholder",
-    )
+    template_markers: tuple[str, ...] | None = None
     min_total_nodes: int = 3
 
 
