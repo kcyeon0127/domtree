@@ -167,13 +167,13 @@ Field requirements:
 - Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; `dom_refs`와 `vis_cues` 외에는 새 오브젝트를 만들지 마세요.
 - `vis_cues` 예시는 다음과 같습니다.
   ```json
-  "vis_cues": {
+  "vis_cues": {{
     "bbox": [120, 0, 400, 1024],
     "font_size": 16,
     "font_weight": "bold",
     "margin_top": 12,
     "margin_bottom": 8
-  }
+  }}
   ```
 - 트리는 최소 3개 이상의 노드를 가져야 합니다. `zone → section → paragraph` 구조를 기본으로 생각하고, 각 노드는 고유한 `reading_order` 값을 갖도록 하세요.
 
@@ -424,10 +424,16 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         return TreeNode(name="llm_error", label="LLM Parse Failure", metadata=metadata, attributes=attributes)
 
     def _looks_like_template_text(self, text: str) -> bool:
+        markers = self.options.template_markers
+        if not markers:
+            return False
         lowered = text.lower()
-        return any(marker in lowered for marker in self.options.template_markers)
+        return any(marker in lowered for marker in markers)
 
     def _looks_like_template_json(self, data) -> bool:
+        markers = self.options.template_markers
+        if not markers:
+            return False
         if isinstance(data, dict):
             for value in data.values():
                 if self._looks_like_template_json(value):
@@ -439,8 +445,11 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         return False
 
     def _contains_marker(self, value: str) -> bool:
+        markers = self.options.template_markers
+        if not markers:
+            return False
         lowered = value.lower()
-        return any(marker in lowered for marker in self.options.template_markers)
+        return any(marker in lowered for marker in markers)
 
     def _validate_tree_dict(self, data: dict) -> None:
         try:
