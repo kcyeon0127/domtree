@@ -93,23 +93,28 @@ def _sanitize_label(text: str | None) -> str:
     return sanitized or "…"
 
 
-def _hierarchy_positions(graph: nx.DiGraph, root: str, width: float = 1.0, vert_gap: float = 0.2, vert_loc: float = 0.0) -> dict:
-    """Recursively assign positions for a tree graph."""
+def _hierarchy_positions(graph: nx.DiGraph, root: str, horiz_gap: float = 0.3, vert_gap: float = 0.2, x_loc: float = 0.0) -> dict:
+    """Assign positions so the tree grows from left to right."""
 
-    def _hierarchy(node: str, width: float, vert_loc: float, x_center: float, pos: dict) -> dict:
+    def _hierarchy(node: str, x_pos: float, y_pos: float, pos: dict) -> dict:
         children = list(graph.successors(node))
+        pos[node] = (x_pos, y_pos)
         if not children:
-            pos[node] = (x_center, vert_loc)
             return pos
-        dx = width / len(children)
-        next_x = x_center - width / 2 + dx / 2
-        pos[node] = (x_center, vert_loc)
-        for child in children:
-            pos = _hierarchy(child, dx, vert_loc - vert_gap, next_x, pos)
-            next_x += dx
+        offsets = _child_offsets(len(children), vert_gap)
+        for offset, child in zip(offsets, children):
+            pos = _hierarchy(child, x_pos + horiz_gap, y_pos + offset, pos)
         return pos
 
-    return _hierarchy(root, width, vert_loc, 0.5, {})
+    return _hierarchy(root, x_loc, 0.0, {})
+
+
+def _child_offsets(count: int, gap: float) -> list[float]:
+    if count == 1:
+        return [0.0]
+    total_span = gap * (count - 1)
+    start = -total_span / 2
+    return [start + i * gap for i in range(count)]
 
 
 def plot_tree(tree: TreeNode, *, title: str = "Tree", figsize: Tuple[int, int] = (8, 6), path: Path | None = None) -> None:

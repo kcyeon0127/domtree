@@ -163,6 +163,8 @@ Field requirements:
 - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
 - Choose descriptive `name`/`type` values derived from the content (e.g., "zone_main", "section_introduction", "paragraph_overview"). Avoid generic placeholders like "top-1".
+- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview` rather than inventing new top-level keys.
+- Do not invent custom top-level keys such as `text`, `content`, or `summary`; follow the schema exactly.
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
@@ -201,6 +203,7 @@ class OllamaVisionOptions:
         "\"text preview\"",
         "\"vis_cues\": null",
         "\"attributes\": null",
+        '"text":',
     )
     min_total_nodes: int = 10
 
@@ -450,7 +453,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
     @staticmethod
     def _validation_feedback(error: str) -> str:
         return (
-            f"\n\nSYSTEM CORRECTION: The JSON violated the schema ({error}). Return data that satisfies every required field in the schema."
+            f"\n\nSYSTEM CORRECTION: The JSON violated the schema ({error}). Every node must include the 'metadata' object and the required fields from the schema. Fix the structure and return JSON only."
         )
 
     def _compose_prompt(self, base_prompt: str, corrections: Iterable[str]) -> str:
