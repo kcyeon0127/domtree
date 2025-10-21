@@ -186,26 +186,15 @@ class OllamaVisionOptions:
     model: str = "llama3.2-vision:11b"
     prompt_template: str = DEFAULT_VISION_PROMPT
     temperature: float = 0.1
-    max_tokens: int = 3072
+    max_tokens: int = 4096
     response_format: Optional[str] = "json"
-    max_retries: int = 3
-    template_markers: tuple[str, ...] = (
+    max_retries: int = 5
+    template_markers: tuple[str, ...] | None = (
         "|section|",
         "zone|section|paragraph|list|table|figure",
-        "main|sidebar",
-        "optional heading",
         "schema",
         "template",
-        "example",
         "placeholder",
-        "\"text heading\"",
-        "\"heading level\"",
-        "\"reading order\"",
-        "\"dom refs\"",
-        "\"text preview\"",
-        "\"vis_cues\": null",
-        "\"attributes\": null",
-        '"text":',
     )
     min_total_nodes: int = 3
 

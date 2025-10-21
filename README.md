@@ -215,7 +215,7 @@ domtree batch urls.txt
 - **세분화 보장**: 템플릿/스키마 위반이나 JSON 파싱 오류가 감지되면 자동으로 교정 메시지를 추가해 재시도합니다.
 - **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 HTML을 요약한 컨텍스트를 함께 전달하는 LLM도 실행해 구조 정보를 보강합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
-- **최소 노드 수 요구**: Vision LLM은 기본적으로 6개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.
+- **최소 노드 수 요구**: Vision LLM은 기본적으로 3개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.
 - `max_retries`나 `template_markers`는 `OllamaVisionOptions` 인자로 조정할 수 있습니다.
 - **커스터마이징 예시**:
   ```python
