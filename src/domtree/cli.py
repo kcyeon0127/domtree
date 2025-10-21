@@ -41,23 +41,18 @@ _LLM_SETTINGS = {
 
 _OUTPUT_ROOT = Path("data/output")
 
-_OLLAMA_ENDPOINT_DEFAULT = "http://localhost:11403/api/chat"
-_OLLAMA_MODEL_DEFAULT = "llama3.2-vision:11b"
+_LLM_BACKEND = "ollama"  # options: "ollama" or "heuristic"
+_OLLAMA_ENDPOINT = "http://localhost:11403/api/chat"
+_OLLAMA_MODEL = "llama3.2-vision:11b"
 
 
-def _create_llm_generator(
-    backend: str,
-    *,
-    min_text_length: int,
-    ollama_endpoint: str,
-    ollama_model: str,
-):
-    backend = backend.lower()
+def _create_llm_generator(min_text_length: int):
+    backend = _LLM_BACKEND.lower()
     if backend == "ollama":
         return OllamaVisionLLMTreeGenerator(
             options=OllamaVisionOptions(
-                endpoint=ollama_endpoint,
-                model=ollama_model,
+                endpoint=_OLLAMA_ENDPOINT,
+                model=_OLLAMA_MODEL,
             )
         )
     if backend == "heuristic":
@@ -71,20 +66,10 @@ def _create_llm_generator(
     raise ValueError(f"Unsupported llm backend: {backend}")
 
 
-def _create_analyzer(
-    *,
-    llm_backend: str,
-    ollama_endpoint: str,
-    ollama_model: str,
-) -> DomTreeAnalyzer:
+def _create_analyzer() -> DomTreeAnalyzer:
     capture_options = CaptureOptions(**_CAPTURE_SETTINGS)
     human_options = HumanTreeOptions(**_HUMAN_SETTINGS)
-    llm_generator = _create_llm_generator(
-        backend=llm_backend,
-        min_text_length=_HUMAN_SETTINGS["min_text_length"],
-        ollama_endpoint=ollama_endpoint,
-        ollama_model=ollama_model,
-    )
+    llm_generator = _create_llm_generator(min_text_length=_HUMAN_SETTINGS["min_text_length"])
     return DomTreeAnalyzer(
         capture_options=capture_options,
         human_options=human_options,
@@ -134,27 +119,10 @@ def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path)
 
 
 @app.command()
-def analyze(
-    url: str = typer.Argument(..., help="Target URL"),
-    llm_backend: str = typer.Option("ollama", "--llm-backend", help="LLM backend: ollama or heuristic"),
-    ollama_endpoint: str = typer.Option(
-        _OLLAMA_ENDPOINT_DEFAULT,
-        "--ollama-endpoint",
-        help="Ollama chat endpoint",
-    ),
-    ollama_model: str = typer.Option(
-        _OLLAMA_MODEL_DEFAULT,
-        "--ollama-model",
-        help="Ollama model identifier",
-    ),
-) -> None:
+def analyze(url: str = typer.Argument(..., help="Target URL")) -> None:
     """Run the full pipeline for a single URL and persist outputs."""
 
-    analyzer = _create_analyzer(
-        llm_backend=llm_backend,
-        ollama_endpoint=ollama_endpoint,
-        ollama_model=ollama_model,
-    )
+    analyzer = _create_analyzer()
     result = analyzer.analyze_url(url)
     slug = _slugify(url)
     run_dir = _prepare_run_dir("single", slug)
@@ -166,20 +134,12 @@ def analyze_offline(
     html_path: Path = typer.Argument(..., exists=True, dir_okay=False),
     screenshot_path: Path = typer.Argument(..., exists=True, dir_okay=False),
     identifier: Optional[str] = typer.Argument(None, help="Optional identifier for saved outputs"),
-    llm_backend: str = typer.Option("ollama", "--llm-backend"),
-    ollama_endpoint: str = typer.Option(_OLLAMA_ENDPOINT_DEFAULT, "--ollama-endpoint"),
-    ollama_model: str = typer.Option(_OLLAMA_MODEL_DEFAULT, "--ollama-model"),
 ) -> None:
     """Run analysis for pre-downloaded HTML and screenshot files."""
 
     analyzer = DomTreeAnalyzer(
         human_options=HumanTreeOptions(**_HUMAN_SETTINGS),
-        llm_generator=_create_llm_generator(
-            backend=llm_backend,
-            min_text_length=_HUMAN_SETTINGS["min_text_length"],
-            ollama_endpoint=ollama_endpoint,
-            ollama_model=ollama_model,
-        ),
+        llm_generator=_create_llm_generator(min_text_length=_HUMAN_SETTINGS["min_text_length"]),
     )
     label = identifier or html_path.stem
     result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)
@@ -192,17 +152,10 @@ def analyze_offline(
 def batch(
     batch_file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Text/CSV/JSON list of URLs"),
     identifier: Optional[str] = typer.Argument(None, help="Optional identifier for saved outputs"),
-    llm_backend: str = typer.Option("ollama", "--llm-backend"),
-    ollama_endpoint: str = typer.Option(_OLLAMA_ENDPOINT_DEFAULT, "--ollama-endpoint"),
-    ollama_model: str = typer.Option(_OLLAMA_MODEL_DEFAULT, "--ollama-model"),
 ) -> None:
     """Run the pipeline on a batch of URLs and persist summary/records."""
 
-    analyzer = _create_analyzer(
-        llm_backend=llm_backend,
-        ollama_endpoint=ollama_endpoint,
-        ollama_model=ollama_model,
-    )
+    analyzer = _create_analyzer()
     results = run_batch_from_file(batch_file, analyzer)
     summary = analyzer.summarize(results)
     label = identifier or batch_file.stem

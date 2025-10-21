@@ -140,7 +140,7 @@ domtree batch urls.txt
 | `_CAPTURE_SETTINGS` | `wait_after_load=1.0`, `max_scroll_steps=40` | 렌더링 대기 시간, 자동 스크롤 수행 횟수 |
 | `_HUMAN_SETTINGS` | `min_text_length=20`, `restrict_to_viewport=True` | Human Tree에 포함할 최소 텍스트 길이, 뷰포트 필터링 여부 |
 | `_LLM_SETTINGS` | `max_depth=4`, `max_children=6` | 휴리스틱 LLM Tree의 최대 깊이/자식 수 |
-| CLI 옵션 | `--llm-backend=ollama` (기본), `--ollama-endpoint`, `--ollama-model` | LLM 백엔드를 선택하거나 Ollama 접속 정보를 변경 |
+| `_LLM_BACKEND`, `_OLLAMA_ENDPOINT`, `_OLLAMA_MODEL` | 기본 LLM 백엔드(`"ollama"`), Ollama API 주소, 모델 식별자 | CLI 옵션 없이 내부 상수를 수정해 백엔드를 전환 |
 
 필요한 값을 `src/domtree/cli.py`에서 직접 수정한 뒤 CLI를 실행하면 변경사항이 즉시 적용됩니다.
 
@@ -186,23 +186,18 @@ domtree batch urls.txt
 3. **CLI에서 사용**
 
    ```bash
-   # 기본값(ollama backend)을 그대로 사용
    domtree analyze https://ko.wikipedia.org/wiki/파이썬
-
-   # Heuristic LLM 트리로 테스트하고 싶다면
-   domtree analyze https://example.com --llm-backend heuristic
-
-   # Ollama 서버가 다른 포트에 있다면
-   domtree analyze https://example.com \
-       --ollama-endpoint http://myhost:12000/api/chat \
-       --ollama-model llama3.2-vision:11b
    ```
+
+   - 기본 동작은 `_LLM_BACKEND = "ollama"` 값에 따라 Ollama Vision 모델을 사용합니다.
+   - Heuristic LLM 트리로 테스트하고 싶다면 `src/domtree/cli.py` 상단의 `_LLM_BACKEND` 값을 `"heuristic"`으로 수정한 뒤 실행하세요.
+   - Ollama 서버 주소나 모델을 바꾸려면 `_OLLAMA_ENDPOINT`, `_OLLAMA_MODEL` 상수를 조정하면 됩니다.
 
 ### 향후 ChatGPT API 연동 시
 
 - `LLMTreeGenerator`를 상속하는 `ChatGPTLLMTreeGenerator`(예시 이름)를 작성해 OpenAI API 호출 코드를 구현합니다.
 - 프롬프트는 README에 정의된 JSON 스키마를 그대로 요구해야 하며, 응답을 `TreeNode.from_dict()`로 역직렬화합니다.
-- CLI에 `--llm-backend chatgpt` 옵션과 API 키/모델 이름을 받을 파라미터를 추가하면 빠르게 전환할 수 있습니다.
+- CLI에서 사용할 때는 `_LLM_BACKEND`를 `"chatgpt"`로 새로 정의하고, 그에 맞는 제너레이터를 `_create_llm_generator()`에 추가하면 전환할 수 있습니다.
 
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`
