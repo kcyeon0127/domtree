@@ -35,3 +35,5 @@ screenshots/
 *.bak
 *.DS_Store
 .cache/
+*.pyc
+__pycache__/
