@@ -155,7 +155,14 @@ Structural requirements:
 - Under each section, include paragraph/list/table/figure nodes for major content blocks. Avoid collapsing multiple paragraphs into one node.
 - Include reading_order for every node in visible order (top-left → bottom-right).
 - When lists or tables are visible, represent them as separate nodes with suitable children if necessary.
+- Limit the tree depth to at most 4 levels by grouping related content as siblings instead of creating single-child chains.
 - Aim to capture at least 10 nodes when the screenshot contains sufficient content.
+
+Field requirements:
+- Use the exact field names from the schema (snake_case such as text_heading, heading_level, reading_order, dom_refs, vis_cues, text_preview).
+- If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{}`. Never emit `null` for arrays/objects.
+- `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
+- Choose descriptive `name`/`type` values derived from the content (e.g., "zone_main", "section_introduction", "paragraph_overview"). Avoid generic placeholders like "top-1".
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
@@ -165,6 +172,7 @@ Rules:
 Return nothing except the JSON.
 Return a single JSON object without code fences.
 Do NOT output schema examples, placeholders (e.g., "zone|section|..."), or explanatory text.
+Do NOT introduce keys with spaces or hyphens; follow the schema exactly.
 """.strip()
 
 
@@ -174,7 +182,7 @@ class OllamaVisionOptions:
     model: str = "llama3.2-vision:11b"
     prompt_template: str = DEFAULT_VISION_PROMPT
     temperature: float = 0.1
-    max_tokens: int = 2048
+    max_tokens: int = 3072
     response_format: Optional[str] = "json"
     max_retries: int = 3
     template_markers: tuple[str, ...] = (
@@ -186,6 +194,13 @@ class OllamaVisionOptions:
         "template",
         "example",
         "placeholder",
+        "\"text heading\"",
+        "\"heading level\"",
+        "\"reading order\"",
+        "\"dom refs\"",
+        "\"text preview\"",
+        "\"vis_cues\": null",
+        "\"attributes\": null",
     )
     min_total_nodes: int = 10
 
@@ -416,7 +431,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             "Return ONE valid JSON object only.\n"
             "Do NOT include code fences, explanations, schemas, or placeholders such as 'zone|section|...'.\n"
             "Use concrete values extracted from the screenshot.\n"
-            "Represent every major visible block (zones → sections → content nodes)."
+            "Represent every major visible block (zones → sections → content nodes).\n"
+            "Use schema field names exactly (snake_case) and avoid null for arrays/objects."
         )
 
     @staticmethod
