@@ -161,6 +161,7 @@ Structural requirements:
 Field requirements:
 - Use the exact field names from the schema (snake_case such as text_heading, heading_level, reading_order, dom_refs, vis_cues, text_preview).
 - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{}`. Never emit `null` for arrays/objects.
+ - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
 - Choose descriptive `name`/`type` values derived from the content (e.g., "zone_main", "section_introduction", "paragraph_overview"). Avoid generic placeholders like "top-1".
 
