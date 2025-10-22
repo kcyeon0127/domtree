@@ -163,9 +163,9 @@ Field requirements:
 - Use the exact field names from the schema (snake_case such as `text_heading`, `heading_level`, `reading_order`, `dom_refs`, `vis_cues`, `text_preview`).
 - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
-- Choose descriptive `name`/`type` values derived from the content (예: `zone_main`, `section_introduction`, `paragraph_overview`).
-- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; `dom_refs`와 `vis_cues` 외에는 새 오브젝트를 만들지 마세요.
-- `vis_cues` 예시는 다음과 같습니다.
+- Choose descriptive `name`/`type` values derived from the content (e.g., `zone_main`, `section_introduction`, `paragraph_overview`).
+- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; do not create new top-level keys like `text` or `content`.
+- Example `vis_cues`:
   ```json
   "vis_cues": {{
     "bbox": [120, 0, 400, 1024],
@@ -175,7 +175,8 @@ Field requirements:
     "margin_bottom": 8
   }}
   ```
-- 트리는 최소 3개 이상의 노드를 가져야 합니다. `zone → section → paragraph` 구조를 기본으로 생각하고, 각 노드는 고유한 `reading_order` 값을 갖도록 하세요.
+- Provide at least 3 nodes. Use a `zone → section → paragraph` pattern as a minimum baseline, and increment `reading_order` globally (1,2,3...).
+- `dom_refs` should reference visible DOM elements or remain an empty array `[]` when unknown.
 
 Rules:
 - Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
