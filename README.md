@@ -11,6 +11,7 @@
 - 배치/리포트: URL 목록 일괄 처리, 요약 통계, CSV/JSON 결과물, 트리 시각화 이미지 출력
 
 ## 최근 변경 사항 (2025-10-21)
+- OpenRouter 기반 ChatGPT 4o mini 백엔드를 추가하고 기본 백엔드를 OpenRouter로 전환했습니다. 별도 조치 없이 `domtree analyze` 실행 시 OpenRouter 호출이 먼저 시도됩니다 (`src/domtree/cli.py`).
 - Ollama Vision 연동 기본 엔드포인트를 `/api/generate`로 통일해 400 오류를 방지했습니다 (`src/domtree/cli.py`, `README` 예제).
 - README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.
 - 실행 결과물이 자동으로 저장되는 기본 경로 설명을 보강해 `--visualize-dir`, `--output-json` 없이도 PNG/JSON이 생성된다는 점을 명확히 했습니다.
@@ -157,7 +158,8 @@ domtree batch urls.txt
 | `_CAPTURE_SETTINGS` | `wait_after_load=1.0`, `max_scroll_steps=40` | 렌더링 대기 시간, 자동 스크롤 수행 횟수 |
 | `_HUMAN_SETTINGS` | `min_text_length=20`, `restrict_to_viewport=True` | Human Tree에 포함할 최소 텍스트 길이, 뷰포트 필터링 여부 |
 | `_LLM_SETTINGS` | `max_depth=4`, `max_children=6` | 휴리스틱 LLM Tree의 최대 깊이/자식 수 |
-| `_LLM_BACKEND`, `_OLLAMA_ENDPOINT`, `_OLLAMA_MODEL` | 기본 LLM 백엔드(`"ollama"`), Ollama API 주소, 모델 식별자 | CLI 옵션 없이 내부 상수를 수정해 백엔드를 전환 |
+| `_LLM_BACKEND`, `_OLLAMA_ENDPOINT`, `_OLLAMA_MODEL` | 기본 LLM 백엔드(`"openrouter"`), Ollama API 주소, 모델 식별자 | CLI 옵션 없이 내부 상수를 수정해 백엔드를 전환 |
+| `_OPENROUTER_ENDPOINT`, `_OPENROUTER_MODEL`, `_OPENROUTER_REFERER`, `_OPENROUTER_TITLE` | OpenRouter 호출 URL, 사용 모델 ID(`openai/gpt-4o-mini`), HTTP Referer(기본 공백), 제목 헤더 | ChatGPT 4o mini 사용 시 필요한 기본값. `OPENROUTER_API_KEY` 환경변수를 함께 설정해야 함 |
 
 필요한 값을 `src/domtree/cli.py`에서 직접 수정한 뒤 CLI를 실행하면 변경사항이 즉시 적용됩니다.
 
@@ -200,12 +202,63 @@ domtree batch urls.txt
    print(result.metrics)
    ```
 
-   - 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
-   - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
-   - 기본적으로 `format="json"`이 설정되어, 모델이 JSON만 반환하도록 강제합니다. 그래도 서술형 텍스트가 섞여 나오면 코드가 자동으로 JSON 블록을 추출해 파싱합니다.
-   - 템플릿(예: `"zone|section|..."`, `"optional heading"`)을 감지하면 자동으로 재시도하며, JSON Schema 검증에서 누락/형식 오류가 나면 교정 지침을 추가해 다시 요청합니다.
-   - JSON을 끝내 파싱하지 못하면 `llm_error` 루트 노드로 대체하여 분석이 계속되고, `llm_tree.json` → `attributes.llm.raw_response`에 원본 응답과 프롬프트 해시가 그대로 저장됩니다.
+- 프롬프트는 스크린샷만 기반으로 구조를 추론하도록 구성되어 있습니다(HTML은 전달하지 않습니다).
+  - 스크린샷은 자동으로 base64로 인코딩되어 메시지 컨텐츠로 전달됩니다.
+  - 기본적으로 `format="json"`이 설정되어, 모델이 JSON만 반환하도록 강제합니다. 그래도 서술형 텍스트가 섞여 나오면 코드가 자동으로 JSON 블록을 추출해 파싱합니다.
+  - 템플릿(예: `"zone|section|..."`, `"optional heading"`)을 감지하면 자동으로 재시도하며, JSON Schema 검증에서 누락/형식 오류가 나면 교정 지침을 추가해 다시 요청합니다.
+  - JSON을 끝내 파싱하지 못하면 `llm_error` 루트 노드로 대체하여 분석이 계속되고, `llm_tree.json` → `attributes.llm.raw_response`에 원본 응답과 프롬프트 해시가 그대로 저장됩니다.
 - Ollama Vision 모델은 `/api/generate` 엔드포인트를 사용해야 하며, `/api/chat`은 메시지 배열 형식만 지원하므로 400 오류가 발생합니다.
+
+### 예: OpenRouter + ChatGPT 4o mini 연동
+
+1. **API 키 및 헤더 설정**
+   ```bash
+   # placeholder "sample" 값을 실제 키로 교체하세요.
+   export OPENROUTER_API_KEY="sk-or-xxxxxxxxxxxxxxxx"
+   ```
+
+   - 저장소 기본값은 `OPENROUTER_API_KEY="sample"`이므로, 실행 전 반드시 실제 키로 덮어써야 합니다.
+   - 실험용 기본값에서는 `HTTP-Referer`를 비워 둡니다. 배포 환경에서 투명성을 높이고 싶다면 `src/domtree/cli.py`의 `_OPENROUTER_REFERER`, `_OPENROUTER_TITLE`을 서비스 도메인과 앱 이름으로 설정하세요.
+
+2. **CLI 백엔드 전환**
+   - 기본 설정이 이미 `_LLM_BACKEND = "openrouter"`이므로 추가 변경 없이 OpenRouter 백엔드가 동작합니다.
+   - Ollama로 전환하려면 `_LLM_BACKEND`를 `"ollama"`로, 휴리스틱 모드로 전환하려면 `"heuristic"`으로 수정하세요.
+   - 필요 시 `_OPENROUTER_ENDPOINT`, `_OPENROUTER_MODEL` 값을 수정해 다른 OpenRouter 모델로 교체할 수 있습니다.
+
+3. **파이프라인에서 직접 사용**
+   ```python
+   from domtree.pipeline import DomTreeAnalyzer
+   from domtree.llm_tree import (
+       OpenRouterVisionLLMTreeGenerator,
+       OpenRouterVisionOptions,
+       OpenRouterVisionDomLLMTreeGenerator,
+       OpenRouterVisionDomOptions,
+   )
+
+   vision_options = OpenRouterVisionOptions(
+       model="openai/gpt-4o-mini",
+       max_retries=5,
+       min_total_nodes=6,
+       template_markers=("placeholder", "zone|section"),
+   )
+
+   dom_options = OpenRouterVisionDomOptions(
+       max_dom_chars=1800,
+       paragraphs_per_section=2,
+   )
+
+   analyzer = DomTreeAnalyzer(
+       llm_generator=OpenRouterVisionLLMTreeGenerator(options=vision_options),
+       dom_llm_generator=OpenRouterVisionDomLLMTreeGenerator(options=dom_options),
+   )
+
+   result = analyzer.analyze_url("https://ko.wikipedia.org/wiki/파이썬")
+   print(result.zone_comparison.metrics.flat())
+   ```
+
+   - 스크린샷 기반 결과는 `llm_tree.json`, DOM 요약을 추가한 결과는 `llm_dom_tree.json`으로 저장됩니다.
+   - 두 LLM 결과의 지표 차이는 `llm_comparison.json`에서 확인할 수 있습니다.
+   - `template_markers`에 JSON 템플릿 키워드를 추가해 템플릿 감지 민감도를 조절할 수 있습니다(필요하지 않으면 생략).
 
 ### LLM 응답 안정화 전략
 - **강제 JSON 모드**: `format="json"`을 기본 활성화해 모델이 JSON만 돌려주도록 요청합니다.
@@ -216,7 +269,7 @@ domtree batch urls.txt
 - **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 HTML을 요약한 컨텍스트를 함께 전달하는 LLM도 실행해 구조 정보를 보강합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
 - **최소 노드 수 요구**: Vision LLM은 기본적으로 3개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.
-- `max_retries`나 `template_markers`는 `OllamaVisionOptions` 인자로 조정할 수 있습니다.
+- `max_retries`나 `template_markers`는 `OllamaVisionOptions` 또는 `OpenRouterVisionOptions` 인자로 조정할 수 있습니다.
 - **커스터마이징 예시**:
   ```python
   options = OllamaVisionOptions(
@@ -239,15 +292,15 @@ LLM이 따라야 하는 JSON Schema는 `src/domtree/schema.py`의 `TREE_JSON_SCH
    domtree analyze https://ko.wikipedia.org/wiki/파이썬
    ```
 
-   - 기본 동작은 `_LLM_BACKEND = "ollama"` 값에 따라 Ollama Vision 모델을 사용합니다.
-   - Heuristic LLM 트리로 테스트하고 싶다면 `src/domtree/cli.py` 상단의 `_LLM_BACKEND` 값을 `"heuristic"`으로 수정한 뒤 실행하세요.
-   - Ollama 서버 주소나 모델을 바꾸려면 `_OLLAMA_ENDPOINT`, `_OLLAMA_MODEL` 상수를 조정하면 됩니다.
+   - 기본 동작은 `_LLM_BACKEND = "openrouter"` 설정에 따라 OpenRouter ChatGPT 4o mini 백엔드를 사용합니다.
+   - Ollama Vision으로 전환하려면 `_LLM_BACKEND`를 `"ollama"`로, 휴리스틱 트리를 사용하려면 `"heuristic"`으로 수정하세요.
+   - 각 백엔드별 세부 옵션은 `_OPENROUTER_*` 또는 `_OLLAMA_*` 상수를 조정하면 됩니다.
 
 ### 향후 ChatGPT API 연동 시
 
 - `LLMTreeGenerator`를 상속하는 `ChatGPTLLMTreeGenerator`(예시 이름)를 작성해 OpenAI API 호출 코드를 구현합니다.
 - 프롬프트는 README에 정의된 JSON 스키마를 그대로 요구해야 하며, 응답을 `TreeNode.from_dict()`로 역직렬화합니다.
-- CLI에서 사용할 때는 `_LLM_BACKEND`를 `"chatgpt"`로 새로 정의하고, 그에 맞는 제너레이터를 `_create_llm_generator()`에 추가하면 전환할 수 있습니다.
+- CLI에서 사용할 때는 `_LLM_BACKEND`에 새로운 키(예: `"chatgpt"`)를 정의하고, 그에 맞는 제너레이터를 `_create_llm_generator()`에 추가하면 백엔드를 확장할 수 있습니다.
 
 ## 출력 경로
 - 캡처 산출물: `data/screenshots/`

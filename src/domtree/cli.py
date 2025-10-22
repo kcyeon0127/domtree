@@ -21,6 +21,10 @@ from .llm_tree import (
     OllamaVisionDomOptions,
     OllamaVisionLLMTreeGenerator,
     OllamaVisionOptions,
+    OpenRouterVisionDomLLMTreeGenerator,
+    OpenRouterVisionDomOptions,
+    OpenRouterVisionLLMTreeGenerator,
+    OpenRouterVisionOptions,
 )
 from .pipeline import AnalysisResult, DomTreeAnalyzer
 from .reporting import export_csv
@@ -45,9 +49,13 @@ _LLM_SETTINGS = {
 
 _OUTPUT_ROOT = Path("data/output")
 
-_LLM_BACKEND = "ollama"  # options: "ollama" or "heuristic"
+_LLM_BACKEND = "openrouter"  # options: "ollama", "openrouter", or "heuristic"
 _OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 _OLLAMA_MODEL = "llama3.2-vision:11b"
+_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+_OPENROUTER_MODEL = "openai/gpt-4o-mini"
+_OPENROUTER_REFERER = ""
+_OPENROUTER_TITLE = "DOMTree Analyzer"
 
 
 def _create_llm_generators(min_text_length: int):
@@ -63,6 +71,24 @@ def _create_llm_generators(min_text_length: int):
             options=OllamaVisionDomOptions(
                 endpoint=_OLLAMA_ENDPOINT,
                 model=_OLLAMA_MODEL,
+            )
+        )
+        return vision, dom
+    if backend == "openrouter":
+        vision = OpenRouterVisionLLMTreeGenerator(
+            options=OpenRouterVisionOptions(
+                endpoint=_OPENROUTER_ENDPOINT,
+                model=_OPENROUTER_MODEL,
+                referer=_OPENROUTER_REFERER,
+                title=_OPENROUTER_TITLE,
+            )
+        )
+        dom = OpenRouterVisionDomLLMTreeGenerator(
+            options=OpenRouterVisionDomOptions(
+                endpoint=_OPENROUTER_ENDPOINT,
+                model=_OPENROUTER_MODEL,
+                referer=_OPENROUTER_REFERER,
+                title=_OPENROUTER_TITLE,
             )
         )
         return vision, dom

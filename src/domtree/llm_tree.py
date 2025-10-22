@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import logging
+import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -527,6 +528,169 @@ class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
     def __init__(self, options: Optional[OllamaVisionDomOptions] = None):
         super().__init__(options)
         self.options: OllamaVisionDomOptions = options or OllamaVisionDomOptions()
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        html = request.html
+        if not html:
+            return super().generate(request)
+
+        summary = self._summarize_dom(html)
+        dom_prompt = (
+            self.options.prompt_template
+            + "\n\nDOM SUMMARY (viewport approximation):\n"
+            + summary
+        )
+        patched_request = dataclasses.replace(request, prompt=dom_prompt)
+        return super().generate(patched_request)
+
+    def _summarize_dom(self, html: str) -> str:
+        soup = BeautifulSoup(html, "lxml")
+        body = soup.body or soup
+        lines: list[str] = []
+
+        headings = body.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
+        for heading in headings[: self.options.max_sections]:
+            text = heading.get_text(" ", strip=True)
+            if not text:
+                continue
+            level = heading.name.upper()
+            lines.append(f"{level}: {text}")
+
+            if self.options.paragraphs_per_section <= 0:
+                continue
+            collected = 0
+            sibling = heading.find_next_sibling()
+            while sibling and collected < self.options.paragraphs_per_section:
+                sibling_name = getattr(sibling, "name", "").lower() if getattr(sibling, "name", None) else ""
+                if sibling_name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                    break
+                snippet = sibling.get_text(" ", strip=True) if getattr(sibling, "get_text", None) else str(sibling).strip()
+                if snippet:
+                    lines.append(f"- {snippet}")
+                    collected += 1
+                sibling = sibling.find_next_sibling()
+
+        summary = "\n".join(lines)
+        max_chars = max(256, self.options.max_dom_chars)
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3] + "..."
+        return summary or "(No visible DOM text extracted)"
+
+
+# --------------------------- OpenRouter GPT-4o mini backend ---------------------------
+
+
+@dataclasses.dataclass
+class OpenRouterVisionOptions(OllamaVisionOptions):
+    endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
+    model: str = "openai/gpt-4o-mini"
+    api_key: str = dataclasses.field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", "sample"))
+    referer: str = "https://example.com/domtree"
+    title: str = "DOMTree Analyzer"
+    response_format: Optional[str] = "json_object"
+
+
+@dataclasses.dataclass
+class OpenRouterVisionDomOptions(OpenRouterVisionOptions):
+    max_dom_chars: int = 2000
+    max_sections: int = 40
+    paragraphs_per_section: int = 2
+
+
+class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
+    """Generate trees using OpenRouter's ChatGPT 4o mini vision capabilities."""
+
+    def __init__(self, options: Optional[OpenRouterVisionOptions] = None):
+        options = options or OpenRouterVisionOptions()
+        super().__init__(options)
+        self.options = options
+
+    def _call_ollama(self, prompt: str, image_b64: str) -> str:  # type: ignore[override]
+        if not self.options.api_key:
+            raise ValueError("OpenRouter API key is not configured. Set OPENROUTER_API_KEY or update the options.")
+        if self.options.api_key == "sample":
+            logger.warning("OpenRouter API key is set to placeholder 'sample'. Replace it with a real key before production use.")
+        headers = {
+            "Authorization": f"Bearer {self.options.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.options.referer:
+            headers["HTTP-Referer"] = self.options.referer
+        if self.options.title:
+            headers["X-Title"] = self.options.title
+
+        message_content = [
+            {"type": "input_text", "text": prompt},
+            {
+                "type": "input_image",
+                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+            },
+        ]
+
+        payload = {
+            "model": self.options.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "You are a meticulous document analyst. Follow the user instructions exactly and answer in JSON only.",
+                        }
+                    ],
+                },
+                {"role": "user", "content": message_content},
+            ],
+            "temperature": self.options.temperature,
+            "max_tokens": self.options.max_tokens,
+        }
+
+        if self.options.response_format:
+            payload["response_format"] = {"type": self.options.response_format}
+
+        response = requests.post(
+            self.options.endpoint,
+            headers=headers,
+            json=payload,
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        choices = data.get("choices")
+        if not choices:
+            raise ValueError(f"Unexpected OpenRouter response: {data}")
+
+        message = choices[0].get("message", {})
+        raw_text = self._extract_message_text(message)
+        if not raw_text:
+            raise ValueError(f"Empty response content from OpenRouter: {data}")
+        return raw_text.strip()
+
+    @staticmethod
+    def _extract_message_text(message: dict) -> str:
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            fragments: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text") or item.get("content") or item.get("value")
+                    if text:
+                        fragments.append(str(text))
+                elif isinstance(item, str):
+                    fragments.append(item)
+            return "".join(fragments).strip()
+        return ""
+
+
+class OpenRouterVisionDomLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
+    """OpenRouter vision generator with additional viewport DOM context."""
+
+    def __init__(self, options: Optional[OpenRouterVisionDomOptions] = None):
+        options = options or OpenRouterVisionDomOptions()
+        super().__init__(options)
+        self.options = options
 
     def generate(self, request: LLMTreeRequest) -> TreeNode:
         html = request.html
