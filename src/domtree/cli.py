@@ -49,7 +49,7 @@ _LLM_SETTINGS = {
 
 _OUTPUT_ROOT = Path("data/output")
 
-_LLM_BACKEND = "openrouter"  # options: "ollama", "openrouter", or "heuristic"
+_LLM_BACKEND = "openrouter"  # options: "ollama"(llamavision), "openrouter"(gpt4omini), or "heuristic"
 _OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 _OLLAMA_MODEL = "llama3.2-vision:11b"
 _OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"

@@ -38,6 +38,8 @@ playwright install-deps
 ## 사용 예시
 ### 단일 URL 분석
 ```bash
+export OPENROUTER_API_KEY="sk-or-실제키"
+
 domtree analyze https://example.com
 
 domtree analyze https://ko.wikipedia.org/wiki/%ED%8C%8C%EC%9D%B4%EC%8D%AC
