@@ -12,6 +12,7 @@
 
 ## 최근 변경 사항 (2025-10-21)
 - OpenRouter 기반 ChatGPT 4o mini 백엔드를 추가하고 기본 백엔드를 OpenRouter로 전환했습니다. 별도 조치 없이 `domtree analyze` 실행 시 OpenRouter 호출이 먼저 시도됩니다 (`src/domtree/cli.py`).
+- OpenRouter 멀티모달 요청에서 `text`/`image_url` 콘텐츠 타입을 사용하도록 정비해 `"No input provided"` 오류를 방지했습니다 (`src/domtree/llm_tree.py`).
 - LLM 호출 실패 시 `llm_tree.json` → `metadata.notes.llm.debug`에 프롬프트 길이, 이미지 크기, DOM 요약 길이, 응답 상태 코드 등을 기록해 원인 분석이 쉽도록 했습니다 (`src/domtree/llm_tree.py`).
 - Ollama Vision 연동 기본 엔드포인트를 `/api/generate`로 통일해 400 오류를 방지했습니다 (`src/domtree/cli.py`, `README` 예제).
 - README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.

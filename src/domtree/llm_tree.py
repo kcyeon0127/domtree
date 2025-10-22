@@ -308,7 +308,7 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
             tree.metadata.notes["llm"]["node_count"] = node_count
             return tree
 
-        logger.warning("Ollama Vision failed after %s attempts: %s", self.options.max_retries, last_reason)
+        logger.warning("%s failed after %s attempts: %s", self.__class__.__name__, self.options.max_retries, last_reason)
         error_tree = self._build_error_tree(
             last_response,
             reason=last_reason,
@@ -672,9 +672,9 @@ class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
         )
 
         message_content = [
-            {"type": "input_text", "text": prompt},
+            {"type": "text", "text": prompt},
             {
-                "type": "input_image",
+                "type": "image_url",
                 "image_url": {"url": f"data:image/png;base64,{image_b64}"},
             },
         ]
