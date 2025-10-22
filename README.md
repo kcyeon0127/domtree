@@ -12,6 +12,7 @@
 
 ## 최근 변경 사항 (2025-10-21)
 - OpenRouter 기반 ChatGPT 4o mini 백엔드를 추가하고 기본 백엔드를 OpenRouter로 전환했습니다. 별도 조치 없이 `domtree analyze` 실행 시 OpenRouter 호출이 먼저 시도됩니다 (`src/domtree/cli.py`).
+- LLM 호출 실패 시 `llm_tree.json` → `metadata.notes.llm.debug`에 프롬프트 길이, 이미지 크기, DOM 요약 길이, 응답 상태 코드 등을 기록해 원인 분석이 쉽도록 했습니다 (`src/domtree/llm_tree.py`).
 - Ollama Vision 연동 기본 엔드포인트를 `/api/generate`로 통일해 400 오류를 방지했습니다 (`src/domtree/cli.py`, `README` 예제).
 - README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.
 - 실행 결과물이 자동으로 저장되는 기본 경로 설명을 보강해 `--visualize-dir`, `--output-json` 없이도 PNG/JSON이 생성된다는 점을 명확히 했습니다.
@@ -270,6 +271,7 @@ domtree batch urls.txt
 - **세분화 보장**: 템플릿/스키마 위반이나 JSON 파싱 오류가 감지되면 자동으로 교정 메시지를 추가해 재시도합니다.
 - **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 HTML을 요약한 컨텍스트를 함께 전달하는 LLM도 실행해 구조 정보를 보강합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
+- **디버그 스냅샷**: 실패 시 `notes.llm.debug`에 프롬프트 길이·미리보기, 이미지 바이트 수/베이스64 길이, DOM 요약 글자 수, HTTP 상태 코드, `usage` 정보 등을 저장합니다.
 - **최소 노드 수 요구**: Vision LLM은 기본적으로 3개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.
 - `max_retries`나 `template_markers`는 `OllamaVisionOptions` 또는 `OpenRouterVisionOptions` 인자로 조정할 수 있습니다.
 - **커스터마이징 예시**:

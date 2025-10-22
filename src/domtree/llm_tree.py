@@ -216,6 +216,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
 
     def __init__(self, options: Optional[OllamaVisionOptions] = None):
         self.options = options or OllamaVisionOptions()
+        self._last_debug: dict = {}
+        self._extra_debug: dict | None = None
 
     def generate(self, request: LLMTreeRequest) -> TreeNode:
         if not request.screenshot_path.exists():
@@ -226,9 +228,31 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         corrections: list[str] = [self._negative_guards()]
         last_response = ""
         last_reason = "json_decode"
+        self._last_debug = {
+            "screenshot_path": str(request.screenshot_path),
+            "image_b64_chars": len(image_b64),
+            "image_b64_preview": image_b64[:80],
+            "generator": self.__class__.__name__,
+            "llm_model": getattr(self.options, "model", "unknown"),
+        }
+        if self._extra_debug:
+            self._last_debug.update(self._extra_debug)
+            self._extra_debug = None
+        try:
+            self._last_debug["image_bytes"] = request.screenshot_path.stat().st_size
+        except OSError:
+            pass
 
         for attempt in range(1, self.options.max_retries + 1):
             full_prompt = self._compose_prompt(base_prompt, corrections)
+            self._last_debug.update(
+                {
+                    "attempt": attempt,
+                    "prompt_chars": len(full_prompt),
+                    "prompt_preview": self._truncate(full_prompt, limit=400),
+                    "correction_count": max(0, len(corrections) - 1),
+                }
+            )
             response = self._call_ollama(full_prompt, image_b64)
             last_response = response
 
@@ -319,7 +343,17 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         if self.options.response_format:
             payload["format"] = self.options.response_format
 
+        self._last_debug.update(
+            {
+                "backend": "ollama",
+                "endpoint": self.options.endpoint,
+                "model": self.options.model,
+                "payload_keys": list(payload.keys()),
+            }
+        )
+
         response = requests.post(self.options.endpoint, json=payload, timeout=180)
+        self._last_debug["status_code"] = response.status_code
         response.raise_for_status()
         data = response.json()
         raw_text = data.get("response", "").strip()
@@ -399,6 +433,8 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
         notes["raw_response_preview"] = preview
         notes["attempts"] = attempts
         notes["prompt_hash"] = prompt_hash
+        if self._last_debug:
+            notes["debug"] = dict(self._last_debug)
         tree.attributes.setdefault("llm", {})
         tree.attributes["llm"].update(
             {
@@ -535,6 +571,12 @@ class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
             return super().generate(request)
 
         summary = self._summarize_dom(html)
+        preview = summary[:200]
+        self._extra_debug = {
+            "dom_summary_chars": len(summary),
+            "dom_summary_preview": preview,
+            "dom_summary_truncated": len(summary) > len(preview),
+        }
         dom_prompt = (
             self.options.prompt_template
             + "\n\nDOM SUMMARY (viewport approximation):\n"
@@ -619,6 +661,16 @@ class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
         if self.options.title:
             headers["X-Title"] = self.options.title
 
+        self._last_debug.update(
+            {
+                "backend": "openrouter",
+                "endpoint": self.options.endpoint,
+                "model": self.options.model,
+                "referer": bool(self.options.referer),
+                "title": self.options.title,
+            }
+        )
+
         message_content = [
             {"type": "input_text", "text": prompt},
             {
@@ -648,12 +700,21 @@ class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
         if self.options.response_format:
             payload["response_format"] = {"type": self.options.response_format}
 
+        self._last_debug.update(
+            {
+                "message_count": len(payload["messages"]),
+                "has_image": any(part.get("type") == "input_image" for part in message_content),
+                "response_format": self.options.response_format,
+            }
+        )
+
         response = requests.post(
             self.options.endpoint,
             headers=headers,
             json=payload,
             timeout=180,
         )
+        self._last_debug["status_code"] = response.status_code
         response.raise_for_status()
         data = response.json()
         choices = data.get("choices")
@@ -664,6 +725,7 @@ class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
         raw_text = self._extract_message_text(message)
         if not raw_text:
             raise ValueError(f"Empty response content from OpenRouter: {data}")
+        self._last_debug["usage"] = data.get("usage", {})
         return raw_text.strip()
 
     @staticmethod
@@ -698,6 +760,12 @@ class OpenRouterVisionDomLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
             return super().generate(request)
 
         summary = self._summarize_dom(html)
+        preview = summary[:200]
+        self._extra_debug = {
+            "dom_summary_chars": len(summary),
+            "dom_summary_preview": preview,
+            "dom_summary_truncated": len(summary) > len(preview),
+        }
         dom_prompt = (
             self.options.prompt_template
             + "\n\nDOM SUMMARY (viewport approximation):\n"
