@@ -33,6 +33,9 @@ class AnalysisResult:
     llm_html_tree: TreeNode | None = None
     zone_html_comparison: ComparisonResult | None = None
     heading_html_comparison: ComparisonResult | None = None
+    llm_html_only_tree: TreeNode | None = None
+    zone_html_only_comparison: ComparisonResult | None = None
+    heading_html_only_comparison: ComparisonResult | None = None
     llm_full_tree: TreeNode | None = None
     zone_full_comparison: ComparisonResult | None = None
     heading_full_comparison: ComparisonResult | None = None
@@ -61,6 +64,11 @@ class AnalysisResult:
             payload["metrics"]["heading_html"] = self.heading_html_comparison.metrics.flat()
             payload["mismatch_patterns"]["zone_html"] = self.zone_html_comparison.metrics.mismatch_patterns
             payload["mismatch_patterns"]["heading_html"] = self.heading_html_comparison.metrics.mismatch_patterns
+        if self.zone_html_only_comparison and self.heading_html_only_comparison:
+            payload["metrics"]["zone_html_only"] = self.zone_html_only_comparison.metrics.flat()
+            payload["metrics"]["heading_html_only"] = self.heading_html_only_comparison.metrics.flat()
+            payload["mismatch_patterns"]["zone_html_only"] = self.zone_html_only_comparison.metrics.mismatch_patterns
+            payload["mismatch_patterns"]["heading_html_only"] = self.heading_html_only_comparison.metrics.mismatch_patterns
         if self.zone_full_comparison and self.heading_full_comparison:
             payload["metrics"]["zone_full"] = self.zone_full_comparison.metrics.flat()
             payload["metrics"]["heading_full"] = self.heading_full_comparison.metrics.flat()
@@ -78,6 +86,7 @@ class DomTreeAnalyzer:
         llm_generator: Optional[LLMTreeGenerator] = None,
         dom_llm_generator: Optional[LLMTreeGenerator] = None,
         html_llm_generator: Optional[LLMTreeGenerator] = None,
+        html_only_llm_generator: Optional[LLMTreeGenerator] = None,
         full_llm_generator: Optional[LLMTreeGenerator] = None,
     ):
         self.capture_options = capture_options or CaptureOptions()
@@ -85,6 +94,7 @@ class DomTreeAnalyzer:
         self.llm_generator = llm_generator or HeuristicLLMTreeGenerator()
         self.dom_llm_generator = dom_llm_generator
         self.html_llm_generator = html_llm_generator
+        self.html_only_llm_generator = html_only_llm_generator
         self.full_llm_generator = full_llm_generator
 
     def analyze_url(self, url: str, *, name: Optional[str] = None) -> AnalysisResult:
@@ -117,6 +127,16 @@ class DomTreeAnalyzer:
             llm_html_tree = html_tree
             zone_html_comparison = compute_comparison(human_trees.zone_tree, html_tree)
             heading_html_comparison = compute_comparison(human_trees.heading_tree, html_tree)
+        llm_html_only_tree = None
+        zone_html_only_comparison = None
+        heading_html_only_comparison = None
+        if self.html_only_llm_generator is not None:
+            html_only_tree = self.html_only_llm_generator.generate(
+                LLMTreeRequest(screenshot_path=Path(capture["screenshot_path"]), html=html)
+            )
+            llm_html_only_tree = html_only_tree
+            zone_html_only_comparison = compute_comparison(human_trees.zone_tree, html_only_tree)
+            heading_html_only_comparison = compute_comparison(human_trees.heading_tree, html_only_tree)
         llm_full_tree = None
         zone_full_comparison = None
         heading_full_comparison = None
@@ -142,6 +162,9 @@ class DomTreeAnalyzer:
             llm_html_tree=llm_html_tree,
             zone_html_comparison=zone_html_comparison,
             heading_html_comparison=heading_html_comparison,
+            llm_html_only_tree=llm_html_only_tree,
+            zone_html_only_comparison=zone_html_only_comparison,
+            heading_html_only_comparison=heading_html_only_comparison,
             llm_full_tree=llm_full_tree,
             zone_full_comparison=zone_full_comparison,
             heading_full_comparison=heading_full_comparison,
@@ -176,6 +199,16 @@ class DomTreeAnalyzer:
             llm_html_tree = html_tree
             zone_html_comparison = compute_comparison(human_trees.zone_tree, html_tree)
             heading_html_comparison = compute_comparison(human_trees.heading_tree, html_tree)
+        llm_html_only_tree = None
+        zone_html_only_comparison = None
+        heading_html_only_comparison = None
+        if self.html_only_llm_generator is not None:
+            html_only_tree = self.html_only_llm_generator.generate(
+                LLMTreeRequest(screenshot_path=screenshot_path, html=html)
+            )
+            llm_html_only_tree = html_only_tree
+            zone_html_only_comparison = compute_comparison(human_trees.zone_tree, html_only_tree)
+            heading_html_only_comparison = compute_comparison(human_trees.heading_tree, html_only_tree)
         llm_full_tree = None
         zone_full_comparison = None
         heading_full_comparison = None
@@ -201,6 +234,9 @@ class DomTreeAnalyzer:
             llm_html_tree=llm_html_tree,
             zone_html_comparison=zone_html_comparison,
             heading_html_comparison=heading_html_comparison,
+            llm_html_only_tree=llm_html_only_tree,
+            zone_html_only_comparison=zone_html_only_comparison,
+            heading_html_only_comparison=heading_html_only_comparison,
             llm_full_tree=llm_full_tree,
             zone_full_comparison=zone_full_comparison,
             heading_full_comparison=heading_full_comparison,
@@ -233,6 +269,11 @@ class DomTreeAnalyzer:
         heading_html_metrics: List[dict] = []
         zone_html_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
         heading_html_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
+
+        zone_html_only_metrics: List[dict] = []
+        heading_html_only_metrics: List[dict] = []
+        zone_html_only_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
+        heading_html_only_mismatch = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
 
         zone_full_metrics: List[dict] = []
         heading_full_metrics: List[dict] = []
@@ -292,6 +333,24 @@ class DomTreeAnalyzer:
                 heading_html_mismatch["extra"] += hhm["extra_nodes"]["count"]
                 heading_html_mismatch["depth_shift"] += hhm["depth_shift"]["count"]
                 heading_html_mismatch["order"] += hhm["reading_order"]["gaps"]
+
+            if analysis.zone_html_only_comparison and analysis.heading_html_only_comparison:
+                zhtml_only = analysis.zone_html_only_comparison.metrics.flat()
+                hhtml_only = analysis.heading_html_only_comparison.metrics.flat()
+                zone_html_only_metrics.append(zhtml_only)
+                heading_html_only_metrics.append(hhtml_only)
+
+                zho = analysis.zone_html_only_comparison.metrics.mismatch_patterns
+                hho = analysis.heading_html_only_comparison.metrics.mismatch_patterns
+                zone_html_only_mismatch["missing"] += zho["missing_nodes"]["count"]
+                zone_html_only_mismatch["extra"] += zho["extra_nodes"]["count"]
+                zone_html_only_mismatch["depth_shift"] += zho["depth_shift"]["count"]
+                zone_html_only_mismatch["order"] += zho["reading_order"]["gaps"]
+
+                heading_html_only_mismatch["missing"] += hho["missing_nodes"]["count"]
+                heading_html_only_mismatch["extra"] += hho["extra_nodes"]["count"]
+                heading_html_only_mismatch["depth_shift"] += hho["depth_shift"]["count"]
+                heading_html_only_mismatch["order"] += hho["reading_order"]["gaps"]
 
             if analysis.zone_full_comparison and analysis.heading_full_comparison:
                 zfull = analysis.zone_full_comparison.metrics.flat()
@@ -357,6 +416,18 @@ class DomTreeAnalyzer:
                 "count": len(heading_html_metrics),
             }
 
+        if zone_html_only_metrics and heading_html_only_metrics:
+            summary["zone_html_only"] = {
+                "average_metrics": _average(zone_html_only_metrics),
+                "mismatch_totals": zone_html_only_mismatch,
+                "count": len(zone_html_only_metrics),
+            }
+            summary["heading_html_only"] = {
+                "average_metrics": _average(heading_html_only_metrics),
+                "mismatch_totals": heading_html_only_mismatch,
+                "count": len(heading_html_only_metrics),
+            }
+
         if zone_full_metrics and heading_full_metrics:
             summary["zone_full"] = {
                 "average_metrics": _average(zone_full_metrics),
@@ -389,6 +460,9 @@ class DomTreeAnalyzer:
         zone_full_side_by_side_path: Optional[Path] = None,
         heading_full_side_by_side_path: Optional[Path] = None,
         llm_full_path: Optional[Path] = None,
+        zone_html_only_side_by_side_path: Optional[Path] = None,
+        heading_html_only_side_by_side_path: Optional[Path] = None,
+        llm_html_only_path: Optional[Path] = None,
     ) -> None:
         if zone_side_by_side_path:
             plot_side_by_side(
@@ -448,6 +522,30 @@ class DomTreeAnalyzer:
                 )
             if llm_html_path:
                 plot_tree(analysis.llm_html_tree, title="LLM Tree (Vision + HTML)", path=llm_html_path)
+
+        if (
+            analysis.zone_html_only_comparison
+            and analysis.heading_html_only_comparison
+            and analysis.llm_html_only_tree is not None
+        ):
+            if zone_html_only_side_by_side_path:
+                plot_side_by_side(
+                    analysis.zone_html_only_comparison.human_tree,
+                    analysis.zone_html_only_comparison.llm_tree,
+                    path=zone_html_only_side_by_side_path,
+                )
+            if heading_html_only_side_by_side_path:
+                plot_side_by_side(
+                    analysis.heading_html_only_comparison.human_tree,
+                    analysis.heading_html_only_comparison.llm_tree,
+                    path=heading_html_only_side_by_side_path,
+                )
+            if llm_html_only_path:
+                plot_tree(
+                    analysis.llm_html_only_tree,
+                    title="LLM Tree (HTML Only)",
+                    path=llm_html_only_path,
+                )
 
         if (
             analysis.zone_full_comparison

@@ -192,6 +192,39 @@ Do NOT introduce keys with spaces or hyphens; follow the schema exactly.
 """.strip()
 
 
+DEFAULT_HTML_ONLY_PROMPT = f"""
+You are a meticulous document analyst. Using ONLY the cleaned viewport HTML snippet supplied below, infer the human-perceived layout.
+
+You MUST return ONE valid JSON object that strictly follows the JSON Schema below. Do not include any additional commentary.
+
+JSON Schema (do not modify):
+{SCHEMA_PROMPT_TEXT}
+
+Structural requirements:
+- Identify zones for main content, navigation, sidebar, footer, etc. based on semantic hints in the HTML.
+- Within each zone, create sections that correspond to headings or structural containers.
+- Under each section, include paragraph/list/table/figure nodes for major content blocks.
+- Include reading_order for every node following DOM order (top to bottom, left to right as implied by the snippet).
+- Limit the tree depth to at most 4 levels by grouping related content as siblings instead of creating single-child chains.
+- Aim to capture at least 10 nodes when the snippet contains sufficient content.
+
+Field requirements:
+- Use the exact field names from the schema (snake_case such as `text_heading`, `heading_level`, `reading_order`, `dom_refs`, `vis_cues`, `text_preview`).
+- If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
+- `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
+- Choose descriptive `name`/`type` values derived from the HTML semantics (e.g., `zone_main`, `section_introduction`, `paragraph_overview`).
+- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`.
+- Provide at least 3 nodes. Use a `zone → section → paragraph` pattern as a minimum baseline, and increment `reading_order` globally (1,2,3...).
+- `dom_refs` should reference visible DOM elements or remain an empty array `[]` when unknown.
+
+Rules:
+- Use only the HTML snippet for evidence. Do not invent nodes that are not represented in the markup.
+- Prefer headings (`<h1>`-`<h6>`), ARIA roles, and structural tags to infer zones and sections.
+- If text is long, place a truncated preview (≤80 characters) in `metadata.text_preview`.
+- Return nothing except the JSON. Do NOT output schema examples, placeholders, or explanatory text.
+""".strip()
+
+
 @dataclasses.dataclass
 class OllamaVisionOptions:
     endpoint: str = "http://localhost:11434/api/generate"
@@ -729,6 +762,11 @@ class OpenRouterVisionFullOptions(OpenRouterVisionOptions):
     text_preview_limit: int = 160
 
 
+@dataclasses.dataclass
+class OpenRouterHtmlOnlyOptions(OpenRouterVisionHtmlOptions):
+    prompt_template: str = DEFAULT_HTML_ONLY_PROMPT
+
+
 class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
     """Generate trees using OpenRouter's ChatGPT 4o mini vision capabilities."""
 
@@ -1179,3 +1217,151 @@ class OpenRouterVisionFullLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
 
         patched_request = dataclasses.replace(request, prompt=full_prompt)
         return super().generate(patched_request)
+
+
+class OpenRouterHtmlOnlyLLMTreeGenerator(OpenRouterVisionHtmlLLMTreeGenerator):
+    """Generate trees using only the cleaned viewport HTML snippet."""
+
+    def __init__(self, options: Optional[OpenRouterHtmlOnlyOptions] = None):
+        options = options or OpenRouterHtmlOnlyOptions()
+        super().__init__(options)
+        self.options = options
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        html = request.html
+        if not html:
+            raise ValueError("HTML content is required for the HTML-only generator")
+
+        clean_html = self._build_viewport_html(html)
+        preview = clean_html[:200]
+        self._extra_debug = {
+            "clean_html_chars": len(clean_html),
+            "clean_html_preview": preview,
+            "clean_html_truncated": len(clean_html) > len(preview),
+        }
+
+        base_prompt = request.prompt or self.options.prompt_template
+        corrections: list[str] = [self._negative_guards()]
+        last_response = ""
+        last_reason = "json_decode"
+        self._last_debug = {
+            "generator": self.__class__.__name__,
+            "llm_model": getattr(self.options, "model", "unknown"),
+            "backend": "openrouter_html_only",
+            "clean_html_chars": len(clean_html),
+            "clean_html_preview": preview,
+        }
+
+        for attempt in range(1, self.options.max_retries + 1):
+            full_prompt = (
+                base_prompt
+                + "\n\nVIEWPORT HTML (cleaned snippet):\n"
+                + clean_html
+                + "\n\nSYSTEM NOTE: The snippet already reflects viewport filtering. Use headings, roles, and structure from this HTML to build the tree."
+            )
+            full_prompt = self._compose_prompt(full_prompt, corrections)
+            response = self._call_openrouter_text_only(full_prompt)
+            last_response = response
+
+            try:
+                data = self._extract_json_dict(response)
+            except ValueError as exc:
+                corrections.append(self._json_fix_feedback(str(exc)))
+                last_reason = "json_decode"
+                continue
+
+            if self._looks_like_template_json(data):
+                corrections.append(self._template_feedback())
+                last_reason = "template_detected"
+                continue
+
+            try:
+                self._validate_tree_dict(data)
+            except ValueError as exc:
+                corrections.append(self._validation_feedback(str(exc)))
+                last_reason = "schema_validation"
+                continue
+
+            node_count = self._count_nodes(data)
+            if node_count < self.options.min_total_nodes:
+                corrections.append(self._detail_feedback(node_count, self.options.min_total_nodes))
+                last_reason = "insufficient_detail"
+                continue
+
+            tree = TreeNode.from_dict(data)
+            self._attach_raw_response(
+                tree,
+                response,
+                attempts=attempt,
+                prompt_hash=self._hash_prompt(full_prompt),
+                status="ok",
+            )
+            tree.metadata.notes.setdefault("llm", {})
+            tree.metadata.notes["llm"]["node_count"] = node_count
+            return tree
+
+        error_tree = self._build_error_tree(
+            last_response,
+            reason=last_reason,
+            attempts=self.options.max_retries,
+        )
+        final_prompt = self._compose_prompt(base_prompt, corrections)
+        self._attach_raw_response(
+            error_tree,
+            last_response,
+            attempts=self.options.max_retries,
+            prompt_hash=self._hash_prompt(final_prompt),
+            status=last_reason,
+        )
+        return error_tree
+
+    def _call_openrouter_text_only(self, prompt: str) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.options.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.options.referer:
+            headers["HTTP-Referer"] = self.options.referer
+        if self.options.title:
+            headers["X-Title"] = self.options.title
+
+        payload = {
+            "model": self.options.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "You are a meticulous document analyst. Follow the user instructions exactly and answer in JSON only.",
+                        }
+                    ],
+                },
+                {"role": "user", "content": [{"type": "text", "text": prompt}]},
+            ],
+            "temperature": self.options.temperature,
+            "max_tokens": self.options.max_tokens,
+        }
+
+        if self.options.response_format:
+            payload["response_format"] = {"type": self.options.response_format}
+
+        response = requests.post(
+            self.options.endpoint,
+            headers=headers,
+            json=payload,
+            timeout=180,
+        )
+        self._last_debug["status_code"] = response.status_code
+        response.raise_for_status()
+        data = response.json()
+        choices = data.get("choices")
+        if not choices:
+            raise ValueError(f"Unexpected OpenRouter response: {data}")
+
+        message = choices[0].get("message", {})
+        raw_text = self._extract_message_text(message)
+        if not raw_text:
+            raise ValueError(f"Empty response content from OpenRouter: {data}")
+        self._last_debug["usage"] = data.get("usage", {})
+        return raw_text.strip()

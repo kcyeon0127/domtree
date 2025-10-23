@@ -29,6 +29,8 @@ from .llm_tree import (
     OpenRouterVisionHtmlOptions,
     OpenRouterVisionFullLLMTreeGenerator,
     OpenRouterVisionFullOptions,
+    OpenRouterHtmlOnlyLLMTreeGenerator,
+    OpenRouterHtmlOnlyOptions,
 )
 from .pipeline import AnalysisResult, DomTreeAnalyzer
 from .tree import TreeNode
@@ -79,7 +81,7 @@ def _create_llm_generators(min_text_length: int):
                 model=_OLLAMA_MODEL,
             )
         )
-        return vision, dom, None, None
+        return vision, dom, None, None, None
     if backend == "openrouter":
         vision = OpenRouterVisionLLMTreeGenerator(
             options=OpenRouterVisionOptions(
@@ -105,6 +107,14 @@ def _create_llm_generators(min_text_length: int):
                 title=_OPENROUTER_TITLE,
             )
         )
+        html_only = OpenRouterHtmlOnlyLLMTreeGenerator(
+            options=OpenRouterHtmlOnlyOptions(
+                endpoint=_OPENROUTER_ENDPOINT,
+                model=_OPENROUTER_MODEL,
+                referer=_OPENROUTER_REFERER,
+                title=_OPENROUTER_TITLE,
+            )
+        )
         full = OpenRouterVisionFullLLMTreeGenerator(
             options=OpenRouterVisionFullOptions(
                 endpoint=_OPENROUTER_ENDPOINT,
@@ -113,7 +123,7 @@ def _create_llm_generators(min_text_length: int):
                 title=_OPENROUTER_TITLE,
             )
         )
-        return vision, dom, html, full
+        return vision, dom, html, full, html_only
     if backend == "heuristic":
         generator = HeuristicLLMTreeGenerator(
             options=HeuristicLLMOptions(
@@ -122,14 +132,20 @@ def _create_llm_generators(min_text_length: int):
                 human_tree_options=HumanTreeOptions(min_text_length=min_text_length),
             )
         )
-        return generator, None, None, None
+        return generator, None, None, None, None
     raise ValueError(f"Unsupported llm backend: {backend}")
 
 
 def _create_analyzer() -> DomTreeAnalyzer:
     capture_options = CaptureOptions(**_CAPTURE_SETTINGS)
     human_options = HumanTreeOptions(**_HUMAN_SETTINGS)
-    llm_generator, dom_llm_generator, html_llm_generator, full_llm_generator = _create_llm_generators(
+    (
+        llm_generator,
+        dom_llm_generator,
+        html_llm_generator,
+        full_llm_generator,
+        html_only_llm_generator,
+    ) = _create_llm_generators(
         min_text_length=_HUMAN_SETTINGS["min_text_length"]
     )
     return DomTreeAnalyzer(
@@ -138,6 +154,7 @@ def _create_analyzer() -> DomTreeAnalyzer:
         llm_generator=llm_generator,
         dom_llm_generator=dom_llm_generator,
         html_llm_generator=html_llm_generator,
+        html_only_llm_generator=html_only_llm_generator,
         full_llm_generator=full_llm_generator,
     )
 
@@ -176,6 +193,8 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
         (run_dir / "llm_html_tree.json").write_text(result.llm_html_tree.to_json(indent=2), encoding="utf-8")
     if result.llm_full_tree is not None:
         (run_dir / "llm_full_tree.json").write_text(result.llm_full_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_html_only_tree is not None:
+        (run_dir / "llm_html_only_tree.json").write_text(result.llm_html_only_tree.to_json(indent=2), encoding="utf-8")
 
     _write_llm_comparison(result, run_dir)
     analyzer.visualize(
@@ -194,6 +213,9 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
         zone_full_side_by_side_path=run_dir / "comparison_zone_full.png",
         heading_full_side_by_side_path=run_dir / "comparison_heading_full.png",
         llm_full_path=run_dir / "llm_full.png",
+        zone_html_only_side_by_side_path=run_dir / "comparison_zone_html_only.png",
+        heading_html_only_side_by_side_path=run_dir / "comparison_heading_html_only.png",
+        llm_html_only_path=run_dir / "llm_html_only.png",
     )
     # Legacy filenames for downstream compatibility
     zone_comparison = run_dir / "comparison_zone.png"
@@ -232,6 +254,7 @@ def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     variants = [
         ("dom", result.zone_dom_comparison, result.heading_dom_comparison),
         ("html", result.zone_html_comparison, result.heading_html_comparison),
+        ("html_only", result.zone_html_only_comparison, result.heading_html_only_comparison),
         ("full", result.zone_full_comparison, result.heading_full_comparison),
     ]
 
@@ -265,6 +288,7 @@ def _save_component_metrics(result: AnalysisResult, run_dir: Path) -> None:
         "llm_vision": _metrics_for(result.llm_tree),
         "llm_dom": _metrics_for(result.llm_dom_tree),
         "llm_html": _metrics_for(result.llm_html_tree),
+        "llm_html_only": _metrics_for(result.llm_html_only_tree),
         "llm_full": _metrics_for(result.llm_full_tree),
     }
 
@@ -302,7 +326,13 @@ def analyze_offline(
 ) -> None:
     """Run analysis for pre-downloaded HTML and screenshot files."""
 
-    llm_generator, dom_llm_generator, html_llm_generator, full_llm_generator = _create_llm_generators(
+    (
+        llm_generator,
+        dom_llm_generator,
+        html_llm_generator,
+        full_llm_generator,
+        html_only_llm_generator,
+    ) = _create_llm_generators(
         min_text_length=_HUMAN_SETTINGS["min_text_length"]
     )
     analyzer = DomTreeAnalyzer(
@@ -311,6 +341,7 @@ def analyze_offline(
         dom_llm_generator=dom_llm_generator,
         html_llm_generator=html_llm_generator,
         full_llm_generator=full_llm_generator,
+        html_only_llm_generator=html_only_llm_generator,
     )
     label = identifier or html_path.stem
     result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)
@@ -327,7 +358,13 @@ def analyze_offline_with_metrics(
 ) -> None:
     """Offline variant that also exports category metrics."""
 
-    llm_generator, dom_llm_generator, html_llm_generator, full_llm_generator = _create_llm_generators(
+    (
+        llm_generator,
+        dom_llm_generator,
+        html_llm_generator,
+        full_llm_generator,
+        html_only_llm_generator,
+    ) = _create_llm_generators(
         min_text_length=_HUMAN_SETTINGS["min_text_length"]
     )
     analyzer = DomTreeAnalyzer(
@@ -336,6 +373,7 @@ def analyze_offline_with_metrics(
         dom_llm_generator=dom_llm_generator,
         html_llm_generator=html_llm_generator,
         full_llm_generator=full_llm_generator,
+        html_only_llm_generator=html_only_llm_generator,
     )
     label = identifier or html_path.stem
     result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)
