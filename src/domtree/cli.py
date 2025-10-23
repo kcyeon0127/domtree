@@ -25,6 +25,8 @@ from .llm_tree import (
     OpenRouterVisionDomOptions,
     OpenRouterVisionLLMTreeGenerator,
     OpenRouterVisionOptions,
+    OpenRouterVisionHtmlLLMTreeGenerator,
+    OpenRouterVisionHtmlOptions,
 )
 from .pipeline import AnalysisResult, DomTreeAnalyzer
 from .reporting import export_csv
@@ -73,7 +75,7 @@ def _create_llm_generators(min_text_length: int):
                 model=_OLLAMA_MODEL,
             )
         )
-        return vision, dom
+        return vision, dom, None
     if backend == "openrouter":
         vision = OpenRouterVisionLLMTreeGenerator(
             options=OpenRouterVisionOptions(
@@ -91,7 +93,15 @@ def _create_llm_generators(min_text_length: int):
                 title=_OPENROUTER_TITLE,
             )
         )
-        return vision, dom
+        html = OpenRouterVisionHtmlLLMTreeGenerator(
+            options=OpenRouterVisionHtmlOptions(
+                endpoint=_OPENROUTER_ENDPOINT,
+                model=_OPENROUTER_MODEL,
+                referer=_OPENROUTER_REFERER,
+                title=_OPENROUTER_TITLE,
+            )
+        )
+        return vision, dom, html
     if backend == "heuristic":
         generator = HeuristicLLMTreeGenerator(
             options=HeuristicLLMOptions(
@@ -100,14 +110,14 @@ def _create_llm_generators(min_text_length: int):
                 human_tree_options=HumanTreeOptions(min_text_length=min_text_length),
             )
         )
-        return generator, None
+        return generator, None, None
     raise ValueError(f"Unsupported llm backend: {backend}")
 
 
 def _create_analyzer() -> DomTreeAnalyzer:
     capture_options = CaptureOptions(**_CAPTURE_SETTINGS)
     human_options = HumanTreeOptions(**_HUMAN_SETTINGS)
-    llm_generator, dom_llm_generator = _create_llm_generators(
+    llm_generator, dom_llm_generator, html_llm_generator = _create_llm_generators(
         min_text_length=_HUMAN_SETTINGS["min_text_length"]
     )
     return DomTreeAnalyzer(
@@ -115,6 +125,7 @@ def _create_analyzer() -> DomTreeAnalyzer:
         human_options=human_options,
         llm_generator=llm_generator,
         dom_llm_generator=dom_llm_generator,
+        html_llm_generator=html_llm_generator,
     )
 
 
@@ -148,7 +159,10 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
     if result.llm_dom_tree is not None:
         (run_dir / "llm_dom_tree.json").write_text(result.llm_dom_tree.to_json(indent=2), encoding="utf-8")
-        _write_llm_comparison(result, run_dir)
+    if result.llm_html_tree is not None:
+        (run_dir / "llm_html_tree.json").write_text(result.llm_html_tree.to_json(indent=2), encoding="utf-8")
+
+    _write_llm_comparison(result, run_dir)
     analyzer.visualize(
         result,
         zone_side_by_side_path=run_dir / "comparison_zone.png",
@@ -159,6 +173,9 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
         zone_dom_side_by_side_path=run_dir / "comparison_zone_dom.png",
         heading_dom_side_by_side_path=run_dir / "comparison_heading_dom.png",
         llm_dom_path=run_dir / "llm_dom.png",
+        zone_html_side_by_side_path=run_dir / "comparison_zone_html.png",
+        heading_html_side_by_side_path=run_dir / "comparison_heading_html.png",
+        llm_html_path=run_dir / "llm_html.png",
     )
     # Legacy filenames for downstream compatibility
     zone_comparison = run_dir / "comparison_zone.png"
@@ -178,34 +195,39 @@ def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path)
 
 
 def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
-    if not (result.zone_dom_comparison and result.heading_dom_comparison):
-        return
-
     zone_vis = result.zone_comparison.metrics.flat()
     heading_vis = result.heading_comparison.metrics.flat()
-    zone_dom = result.zone_dom_comparison.metrics.flat()
-    heading_dom = result.heading_dom_comparison.metrics.flat()
 
-    def _delta(dom_metrics: dict, vis_metrics: dict) -> dict:
+    def _delta(candidate: dict, reference: dict) -> dict:
         delta = {}
-        for key, dom_value in dom_metrics.items():
-            vis_value = vis_metrics.get(key)
-            if isinstance(dom_value, (int, float)) and isinstance(vis_value, (int, float)):
-                delta[key] = dom_value - vis_value
+        for key, cand_value in candidate.items():
+            ref_value = reference.get(key)
+            if isinstance(cand_value, (int, float)) and isinstance(ref_value, (int, float)):
+                delta[key] = cand_value - ref_value
         return delta
 
     comparison = {
-        "zone": {
-            "vision": zone_vis,
-            "vision_dom": zone_dom,
-            "delta": _delta(zone_dom, zone_vis),
-        },
-        "heading": {
-            "vision": heading_vis,
-            "vision_dom": heading_dom,
-            "delta": _delta(heading_dom, heading_vis),
-        },
+        "zone": {"vision": zone_vis},
+        "heading": {"vision": heading_vis},
     }
+
+    variants = [
+        ("dom", result.zone_dom_comparison, result.heading_dom_comparison),
+        ("html", result.zone_html_comparison, result.heading_html_comparison),
+    ]
+
+    for key, zone_variant, heading_variant in variants:
+        if not (zone_variant and heading_variant):
+            continue
+        zone_metrics = zone_variant.metrics.flat()
+        heading_metrics = heading_variant.metrics.flat()
+        comparison["zone"][f"vision_{key}"] = zone_metrics
+        comparison["zone"][f"delta_{key}"] = _delta(zone_metrics, zone_vis)
+        comparison["heading"][f"vision_{key}"] = heading_metrics
+        comparison["heading"][f"delta_{key}"] = _delta(heading_metrics, heading_vis)
+
+    if len(comparison["zone"]) == 1 and len(comparison["heading"]) == 1:
+        return
 
     _write_json(run_dir / "llm_comparison.json", comparison)
 
@@ -229,13 +251,14 @@ def analyze_offline(
 ) -> None:
     """Run analysis for pre-downloaded HTML and screenshot files."""
 
-    llm_generator, dom_llm_generator = _create_llm_generators(
+    llm_generator, dom_llm_generator, html_llm_generator = _create_llm_generators(
         min_text_length=_HUMAN_SETTINGS["min_text_length"]
     )
     analyzer = DomTreeAnalyzer(
         human_options=HumanTreeOptions(**_HUMAN_SETTINGS),
         llm_generator=llm_generator,
         dom_llm_generator=dom_llm_generator,
+        html_llm_generator=html_llm_generator,
     )
     label = identifier or html_path.stem
     result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)

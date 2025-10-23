@@ -137,7 +137,7 @@ domtree batch urls.txt
 2. **Human Tree 추출**: Zone(시맨틱 컨테이너) → Heading → 콘텐츠 블록 순으로 계층을 구축하고, `reading_order`, `dom_refs`, `vis_cues`(bbox 포함) 등 메타데이터를 채웁니다. 기본 설정(`restrict_to_viewport=True`)은 스크린샷에 실제 보인 부분만 유지합니다.
 3. **LLM Tree 생성**: 기본 구현은 Human Tree를 요약해 LLM이 인지할 법한 구조를 휴리스틱으로 근사합니다. 실제 모델 연동 시 `LLMTreeGenerator`를 구현하거나 파라미터를 조정해 자유롭게 구성할 수 있습니다.
 4. **비교 및 평가**: TED, Hierarchical F1, Structural Similarity, Reading Order Alignment, mismatch 리포트로 두 트리의 차이를 정량화합니다.
-5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다. Vision 기반 LLM 결과(`llm_tree.json`)와 DOM 요약을 추가로 제공한 결과(`llm_dom_tree.json`)를 모두 저장하며, 두 결과의 지표 차이를 요약한 `llm_comparison.json`도 생성됩니다.
+5. **결과 산출**: `data/output/<mode>/<slug>/<timestamp>/`에 JSON(트리/메트릭)과 PNG(사람/LLM 비교)를 기록하고, `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json`/`llm_html_tree.json`에서 모든 텍스트와 메타데이터를 확인할 수 있습니다. Vision 기반 LLM(`llm_tree.json`), DOM 요약 보강(`llm_dom_tree.json`), 뷰포트 정제 HTML 보강(`llm_html_tree.json`)을 나란히 저장하며, 세 모드의 지표 차이는 `llm_comparison.json`에 정리됩니다.
 
 ## LLM 비교 및 평가 지표 (실제 구현 기준)
 - **Tree Edit Distance / Normalized TED** (`domtree.metrics.ted`): `zss`를 이용해 삽입·삭제·치환 비용으로 구조 차이를 계산합니다.
@@ -152,7 +152,7 @@ domtree batch urls.txt
 - Ubuntu/Debian: `sudo apt install fonts-nanum fonts-noto-cjk`
 - Conda 환경: `conda install -c conda-forge noto-fonts-cjk` (macOS arm64에서는 일부 폰트 패키지가 제공되지 않을 수 있습니다)
 - 번들 사용: `src/assets/fonts/`에 원하는 `.ttf/.otf/.ttc` 파일을 넣으면 앱이 자동으로 모두 로드합니다. 예: `Nanum Gothic`, `Noto Sans CJK`, `Noto Sans Sinhala` 등을 넣어두면 서버 환경에서도 동일한 폰트 스택이 적용됩니다. 추가 폰트를 넣었다면 라이선스 파일도 함께 보관하세요.
-- 시각화 PNG에서는 가독성을 위해 지원되지 않는 문자(폰트에 없는 스크립트)는 자동으로 제거/생략됩니다. 원본 텍스트는 `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json` 메타데이터에 그대로 남습니다.
+- 시각화 PNG에서는 가독성을 위해 지원되지 않는 문자(폰트에 없는 스크립트)는 자동으로 제거/생략됩니다. 원본 텍스트는 `human_zone_tree.json`/`human_heading_tree.json`/`llm_tree.json`/`llm_dom_tree.json`/`llm_html_tree.json` 메타데이터에 그대로 남습니다.
 
 ### CLI 기본 하이퍼파라미터 조정
 터미널 실행 시에는 내부 기본값을 사용하며, 아래 상수를 수정해 하이퍼파라미터를 조절할 수 있습니다.
@@ -260,7 +260,7 @@ domtree batch urls.txt
    print(result.zone_comparison.metrics.flat())
    ```
 
-   - 스크린샷 기반 결과는 `llm_tree.json`, DOM 요약을 추가한 결과는 `llm_dom_tree.json`으로 저장됩니다.
+   - 스크린샷 기반 결과는 `llm_tree.json`, DOM 요약 보강 결과는 `llm_dom_tree.json`, 정제 HTML 보강 결과는 `llm_html_tree.json`으로 저장됩니다.
    - 두 LLM 결과의 지표 차이는 `llm_comparison.json`에서 확인할 수 있습니다.
    - `template_markers`에 JSON 템플릿 키워드를 추가해 템플릿 감지 민감도를 조절할 수 있습니다(필요하지 않으면 생략).
 
@@ -271,6 +271,7 @@ domtree batch urls.txt
 - **정식 JSON Schema 검증**: `src/domtree/schema.py`에 정의한 `TREE_JSON_SCHEMA`(Draft-07)를 사용해 응답을 검증하고, 스키마 위반 시 구체적인 오류 메시지로 재시도 지침을 전달합니다.
 - **세분화 보장**: 템플릿/스키마 위반이나 JSON 파싱 오류가 감지되면 자동으로 교정 메시지를 추가해 재시도합니다.
 - **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 안에 실제로 노출된 영역을 Human Tree 로직으로 정제해 만든 zone/section 요약을 추가 컨텍스트로 제공합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
+- **Vision + Clean HTML 모드**: Human Tree가 추출한 zone/section/paragraph 계층을 간결한 HTML로 직렬화해 함께 제공함으로써, 스크린샷과 정제된 구조를 동시에 고려한 트리를 생성합니다(`llm_html_tree.json`, `comparison_*_html.png`).
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
 - **디버그 스냅샷**: 실패 시 `notes.llm.debug`에 프롬프트 길이·미리보기, 이미지 바이트 수/베이스64 길이, DOM 요약 글자 수, HTTP 상태 코드, `usage` 정보 등을 저장합니다.
 - **최소 노드 수 요구**: Vision LLM은 기본적으로 3개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.

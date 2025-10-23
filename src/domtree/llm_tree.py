@@ -8,6 +8,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from html import escape
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -711,6 +712,14 @@ class OpenRouterVisionDomOptions(OpenRouterVisionOptions):
     paragraphs_per_section: int = 2
 
 
+@dataclasses.dataclass
+class OpenRouterVisionHtmlOptions(OpenRouterVisionOptions):
+    max_html_chars: int = 4000
+    max_sections: int = 40
+    paragraphs_per_section: int = 3
+    text_preview_limit: int = 160
+
+
 class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
     """Generate trees using OpenRouter's ChatGPT 4o mini vision capabilities."""
 
@@ -878,3 +887,206 @@ class OpenRouterVisionDomLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
         if len(summary) > max_chars:
             summary = summary[: max_chars - 3] + "..."
         return summary or "(No visible DOM text extracted)"
+
+
+class OpenRouterVisionHtmlLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
+    """OpenRouter vision generator with cleaned viewport HTML outline as context."""
+
+    def __init__(self, options: Optional[OpenRouterVisionHtmlOptions] = None):
+        options = options or OpenRouterVisionHtmlOptions()
+        super().__init__(options)
+        self.options = options
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        html = request.html
+        if not html:
+            return super().generate(request)
+
+        clean_html = self._build_viewport_html(html)
+        preview = clean_html[:200]
+        self._extra_debug = {
+            "clean_html_chars": len(clean_html),
+            "clean_html_preview": preview,
+            "clean_html_truncated": len(clean_html) > len(preview),
+        }
+        html_prompt = (
+            self.options.prompt_template
+            + "\n\nVIEWPORT HTML (cleaned):\n"
+            + clean_html
+        )
+        patched_request = dataclasses.replace(request, prompt=html_prompt)
+        return super().generate(patched_request)
+
+    def _build_viewport_html(self, html: str) -> str:
+        try:
+            options = HumanTreeOptions(
+                min_text_length=25,
+                restrict_to_viewport=True,
+                include_lists=True,
+                include_tables=True,
+                include_figures=True,
+                include_text_nodes=False,
+                max_list_items=5,
+            )
+            extractor = HumanTreeExtractor(html, options=options)
+            bundle = extractor.extract()
+            rendered = self._render_zone_tree_as_html(bundle.zone_tree)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Viewport HTML rendering failed: %s", exc)
+            rendered = self._fallback_html(html)
+
+        max_chars = max(256, self.options.max_html_chars)
+        if len(rendered) > max_chars:
+            rendered = rendered[: max_chars - 3] + "..."
+        return rendered or "<document />"
+
+    def _render_zone_tree_as_html(self, tree: TreeNode) -> str:
+        lines = ["<document>"]
+        section_budget = self.options.max_sections
+        for zone in tree.children:
+            if section_budget <= 0:
+                break
+            zone_lines, section_budget = self._render_zone(zone, section_budget, indent=1)
+            if zone_lines:
+                lines.extend(zone_lines)
+        lines.append("</document>")
+        return "\n".join(lines)
+
+    def _render_zone(
+        self,
+        zone: TreeNode,
+        section_budget: int,
+        *,
+        indent: int,
+    ) -> tuple[list[str], int]:
+        lines: list[str] = []
+        indent_str = "  " * indent
+        attrs = {
+            "role": zone.metadata.role or zone.name,
+            "heading": zone.metadata.text_heading or zone.label or "",
+            "order": str(zone.metadata.reading_order),
+        }
+        bbox = zone.metadata.visual_cues.bbox
+        if bbox and all(value is not None for value in bbox):
+            attrs["bbox"] = ",".join(str(round(value, 2)) for value in bbox)
+        attr_str = " ".join(
+            f'{name}="{escape(value)}"'
+            for name, value in attrs.items()
+            if value
+        )
+        lines.append(f"{indent_str}<zone {attr_str}>")
+
+        sections = [child for child in zone.children if child.name == "section"]
+        if sections:
+            for section in sections:
+                if section_budget <= 0:
+                    break
+                section_lines, section_budget = self._render_section(
+                    section,
+                    section_budget,
+                    indent=indent + 1,
+                )
+                if section_lines:
+                    lines.extend(section_lines)
+        else:
+            content_lines = self._render_content_nodes(
+                zone.children,
+                limit=self.options.paragraphs_per_section,
+                indent=indent + 1,
+            )
+            lines.extend(content_lines)
+
+        lines.append(f"{indent_str}</zone>")
+        return lines, section_budget
+
+    def _render_section(
+        self,
+        section: TreeNode,
+        section_budget: int,
+        *,
+        indent: int,
+    ) -> tuple[list[str], int]:
+        lines: list[str] = []
+        indent_str = "  " * indent
+        attrs = {
+            "heading": section.metadata.text_heading or section.label or "",
+            "level": str(section.metadata.heading_level or ""),
+            "order": str(section.metadata.reading_order),
+        }
+        attr_str = " ".join(
+            f'{name}="{escape(value)}"'
+            for name, value in attrs.items()
+            if value
+        )
+        lines.append(f"{indent_str}<section {attr_str}>")
+
+        content_lines = self._render_content_nodes(
+            section.children,
+            limit=self.options.paragraphs_per_section,
+            indent=indent + 1,
+        )
+        lines.extend(content_lines)
+
+        lines.append(f"{indent_str}</section>")
+        return lines, section_budget - 1
+
+    def _render_content_nodes(
+        self,
+        nodes: Iterable[TreeNode],
+        *,
+        limit: int,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        taken = 0
+        indent_str = "  " * indent
+        for node in nodes:
+            if limit >= 0 and taken >= limit:
+                break
+            if node.name == "section":
+                continue
+            text = self._short_text(node)
+            if node.name == "list" and node.children:
+                lines.append(f"{indent_str}<list order=\"{node.metadata.reading_order}\">")
+                for item in node.children[: self.options.paragraphs_per_section]:
+                    item_text = self._short_text(item)
+                    if not item_text:
+                        continue
+                    lines.append(
+                        f"{indent_str}  <item order=\"{item.metadata.reading_order}\">{escape(item_text)}</item>"
+                    )
+                lines.append(f"{indent_str}</list>")
+                taken += 1
+                continue
+            if not text:
+                continue
+            tag = {
+                "paragraph": "paragraph",
+                "table": "table",
+                "figure": "figure",
+            }.get(node.name, "content")
+            lines.append(
+                f"{indent_str}<{tag} order=\"{node.metadata.reading_order}\">{escape(text)}</{tag}>"
+            )
+            taken += 1
+        return lines
+
+    def _short_text(self, node: TreeNode) -> str:
+        text = node.metadata.text_preview or node.label or ""
+        text = text.strip()
+        if not text:
+            return ""
+        limit = max(32, self.options.text_preview_limit)
+        if len(text) > limit:
+            return text[: limit - 1] + "…"
+        return text
+
+    def _fallback_html(self, html: str) -> str:
+        soup = BeautifulSoup(html, "lxml")
+        body = soup.body or soup
+        text = body.get_text(" ", strip=True)
+        text = (text or "No visible content").strip()
+        limit = max(256, self.options.max_html_chars)
+        if len(text) > limit:
+            text = text[: limit - 1] + "…"
+        return "<document>\n  <text>" + escape(text) + "</text>\n</document>"
