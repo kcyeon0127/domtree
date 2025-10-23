@@ -27,8 +27,12 @@ from .llm_tree import (
     OpenRouterVisionOptions,
     OpenRouterVisionHtmlLLMTreeGenerator,
     OpenRouterVisionHtmlOptions,
+    OpenRouterVisionFullLLMTreeGenerator,
+    OpenRouterVisionFullOptions,
 )
 from .pipeline import AnalysisResult, DomTreeAnalyzer
+from .tree import TreeNode
+from .mapping import annotate_tree_with_categories, compute_category_stats
 from .reporting import export_csv
 
 app = typer.Typer(help="Analyse differences between human-perceived and LLM-derived DOM trees.")
@@ -247,6 +251,26 @@ def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     _write_json(run_dir / "llm_comparison.json", comparison)
 
 
+def _save_component_metrics(result: AnalysisResult, run_dir: Path) -> None:
+    def _metrics_for(tree: TreeNode | None) -> dict | None:
+        if tree is None:
+            return None
+        clone = tree.copy()
+        annotate_tree_with_categories(clone)
+        return compute_category_stats(clone)
+
+    metrics = {
+        "human_zone": _metrics_for(result.human_zone_tree),
+        "human_heading": _metrics_for(result.human_heading_tree),
+        "llm_vision": _metrics_for(result.llm_tree),
+        "llm_dom": _metrics_for(result.llm_dom_tree),
+        "llm_html": _metrics_for(result.llm_html_tree),
+        "llm_full": _metrics_for(result.llm_full_tree),
+    }
+
+    _write_json(run_dir / "component_metrics.json", metrics)
+
+
 @app.command()
 def analyze(url: str = typer.Argument(..., help="Target URL")) -> None:
     """Run the full pipeline for a single URL and persist outputs."""
@@ -256,6 +280,18 @@ def analyze(url: str = typer.Argument(..., help="Target URL")) -> None:
     slug = _slugify(url)
     run_dir = _prepare_run_dir("single", slug)
     _save_analysis(analyzer, result, run_dir)
+
+
+@app.command("analyze-with-metrics")
+def analyze_with_metrics(url: str = typer.Argument(..., help="Target URL")) -> None:
+    """Run analysis and also export category-level component metrics."""
+
+    analyzer = _create_analyzer()
+    result = analyzer.analyze_url(url)
+    slug = _slugify(url)
+    run_dir = _prepare_run_dir("single", slug)
+    _save_analysis(analyzer, result, run_dir)
+    _save_component_metrics(result, run_dir)
 
 
 @app.command("analyze-offline")
@@ -281,6 +317,32 @@ def analyze_offline(
     slug = _slugify(label)
     run_dir = _prepare_run_dir("offline", slug)
     _save_analysis(analyzer, result, run_dir)
+
+
+@app.command("analyze-offline-with-metrics")
+def analyze_offline_with_metrics(
+    html_path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    screenshot_path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    identifier: Optional[str] = typer.Argument(None, help="Optional identifier for saved outputs"),
+) -> None:
+    """Offline variant that also exports category metrics."""
+
+    llm_generator, dom_llm_generator, html_llm_generator, full_llm_generator = _create_llm_generators(
+        min_text_length=_HUMAN_SETTINGS["min_text_length"]
+    )
+    analyzer = DomTreeAnalyzer(
+        human_options=HumanTreeOptions(**_HUMAN_SETTINGS),
+        llm_generator=llm_generator,
+        dom_llm_generator=dom_llm_generator,
+        html_llm_generator=html_llm_generator,
+        full_llm_generator=full_llm_generator,
+    )
+    label = identifier or html_path.stem
+    result = analyzer.analyze_offline(html_path=html_path, screenshot_path=screenshot_path, url=label)
+    slug = _slugify(label)
+    run_dir = _prepare_run_dir("offline", slug)
+    _save_analysis(analyzer, result, run_dir)
+    _save_component_metrics(result, run_dir)
 
 
 @app.command()

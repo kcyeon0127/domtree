@@ -51,6 +51,12 @@ domtree analyze https://ko.wikipedia.org/wiki/%ED%8C%8C%EC%9D%B4%EC%8D%AC
 - 분석 결과, 메트릭 요약, 트리 시각화는 `data/output/single/<슬러그>/<타임스탬프>/` 하위에 저장됩니다.
 - CLI는 터미널에 메트릭을 출력하지 않으며, 모든 산출물을 파일로만 남깁니다.
 
+#### 카테고리 통계를 함께 보고 싶다면
+```bash
+domtree analyze-with-metrics https://example.com
+```
+- 기본 산출물 외에 `component_metrics.json`이 추가되며, 사람/LLM 트리 각각에 대해 PubLayNet·DocLayNet 기반 카테고리별 노드 수·면적 비율이 기록됩니다.
+
 ### 오프라인 자산 분석
 이미 수집한 `saved_page.html`, `saved_page.png`가 있을 경우:
 ```bash
@@ -58,6 +64,8 @@ domtree analyze-offline saved_page.html saved_page.png
 ```
 - 필요하다면 세 번째 인자로 식별자(예: `domtree analyze-offline saved_page.html saved_page.png mylabel`)를 지정해 저장 폴더 이름을 제어할 수 있습니다.
 - 결과물은 `data/output/offline/<식별자>/<타임스탬프>/`에 저장됩니다.
+
+오프라인에서도 카테고리 통계를 함께 받고 싶다면 `domtree analyze-offline-with-metrics saved_page.html saved_page.png` 명령을 사용하세요. 동일하게 `component_metrics.json`이 생성됩니다.
 
 ### 배치 처리
 `urls.txt`(한 줄당 하나의 URL) 또는 `url` 컬럼을 가진 CSV/JSON 파일을 준비한 후:
@@ -75,6 +83,7 @@ domtree batch urls.txt
 - `domtree.pipeline`: 전체 파이프라인 오케스트레이션, 배치 처리, 시각화, 요약 통계
 - `domtree.visualization`: 네트워크 그래프 기반 트리/비교 시각화
 - `domtree.cli`: Typer CLI 커맨드 (`analyze`, `analyze-offline`, `batch`)
+- `domtree.mapping`: PubLayNet/DocLayNet 카테고리를 참고해 DOM/LLM 노드를 표준 레이아웃 라벨에 매핑하고(`mapping.categories`, `mapping.mapper`), 카테고리별 빈도·면적 분포를 집계하는 보조 함수(`mapping.stats`).
 
 ### 사람 인식 트리 스키마
 `HumanTreeExtractor`는 Zone Tree와 Heading Tree를 중첩한 구조를 생성합니다. 각 노드는 `metadata`에 다음과 같은 공통 필드를 유지합니다.
