@@ -93,29 +93,30 @@ def _sanitize_label(text: str | None) -> str:
     return sanitized or "…"
 
 
-def _hierarchy_positions(graph: nx.DiGraph, root: str, horiz_gap: float = 0.3, vert_gap: float = 0.2, x_loc: float = 0.0) -> dict:
-    """Assign positions so the tree grows from left to right."""
+def _hierarchy_positions(graph: nx.DiGraph, root: str, horiz_gap: float = 1.0, vert_gap: float = 1.2) -> dict:
+    """Assign positions so the tree grows from left to right with unique rows."""
 
-    def _hierarchy(node: str, x_pos: float, y_pos: float, pos: dict) -> dict:
+    pos: dict[str, tuple[float, float]] = {}
+    y_next = 0.0
+
+    def _dfs(node: str, depth: int) -> tuple[float, float]:
+        nonlocal y_next
         children = list(graph.successors(node))
-        pos[node] = (x_pos, y_pos)
         if not children:
-            return pos
-        offsets = _child_offsets(len(children), vert_gap)
-        for offset, child in zip(offsets, children):
-            pos = _hierarchy(child, x_pos + horiz_gap, y_pos + offset, pos)
-        return pos
+            y = y_next
+            y_next += vert_gap
+            pos[node] = (depth * horiz_gap, y)
+            return y, y
 
-    return _hierarchy(root, x_loc, 0.0, {})
+        child_ranges = [_dfs(child, depth + 1) for child in children]
+        min_y = child_ranges[0][0]
+        max_y = child_ranges[-1][1]
+        center_y = (min_y + max_y) / 2
+        pos[node] = (depth * horiz_gap, center_y)
+        return min_y, max_y
 
-
-def _child_offsets(count: int, gap: float) -> list[float]:
-    if count == 1:
-        tiny = gap * 0.25 if gap else 0.1
-        return [-tiny, tiny]
-    total_span = gap * (count - 1)
-    start = -total_span / 2
-    return [start + i * gap for i in range(count)]
+    _dfs(root, 0)
+    return pos
 
 
 def plot_tree(
