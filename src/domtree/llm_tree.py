@@ -720,6 +720,15 @@ class OpenRouterVisionHtmlOptions(OpenRouterVisionOptions):
     text_preview_limit: int = 160
 
 
+@dataclasses.dataclass
+class OpenRouterVisionFullOptions(OpenRouterVisionOptions):
+    max_dom_chars: int = 2000
+    max_html_chars: int = 4000
+    max_sections: int = 40
+    paragraphs_per_section: int = 3
+    text_preview_limit: int = 160
+
+
 class OpenRouterVisionLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
     """Generate trees using OpenRouter's ChatGPT 4o mini vision capabilities."""
 
@@ -1090,3 +1099,83 @@ class OpenRouterVisionHtmlLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
         if len(text) > limit:
             text = text[: limit - 1] + "…"
         return "<document>\n  <text>" + escape(text) + "</text>\n</document>"
+
+
+class OpenRouterVisionFullLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
+    """OpenRouter vision generator using DOM outline and cleaned HTML together."""
+
+    def __init__(self, options: Optional[OpenRouterVisionFullOptions] = None):
+        options = options or OpenRouterVisionFullOptions()
+        super().__init__(options)
+        self.options = options
+        self._dom_helper = OpenRouterVisionDomLLMTreeGenerator(
+            options=OpenRouterVisionDomOptions(
+                endpoint=options.endpoint,
+                model=options.model,
+                api_key=options.api_key,
+                referer=options.referer,
+                title=options.title,
+                temperature=options.temperature,
+                max_tokens=options.max_tokens,
+                response_format=options.response_format,
+                max_dom_chars=options.max_dom_chars,
+                max_sections=options.max_sections,
+                paragraphs_per_section=options.paragraphs_per_section,
+            )
+        )
+        self._html_helper = OpenRouterVisionHtmlLLMTreeGenerator(
+            options=OpenRouterVisionHtmlOptions(
+                endpoint=options.endpoint,
+                model=options.model,
+                api_key=options.api_key,
+                referer=options.referer,
+                title=options.title,
+                temperature=options.temperature,
+                max_tokens=options.max_tokens,
+                response_format=options.response_format,
+                max_html_chars=options.max_html_chars,
+                max_sections=options.max_sections,
+                paragraphs_per_section=options.paragraphs_per_section,
+                text_preview_limit=options.text_preview_limit,
+            )
+        )
+
+    def generate(self, request: LLMTreeRequest) -> TreeNode:
+        html = request.html
+        if not html:
+            return super().generate(request)
+
+        dom_summary = self._dom_helper._summarize_dom(html)
+        html_outline = self._html_helper._build_viewport_html(html)
+
+        preview_dom = dom_summary[:200]
+        preview_html = html_outline[:200]
+        self._extra_debug = {
+            "dom_summary_chars": len(dom_summary),
+            "dom_summary_preview": preview_dom,
+            "dom_summary_truncated": len(dom_summary) > len(preview_dom),
+            "clean_html_chars": len(html_outline),
+            "clean_html_preview": preview_html,
+            "clean_html_truncated": len(html_outline) > len(preview_html),
+        }
+
+        guideline = (
+            "The following context blocks are provided in order. "
+            "Use them all when building the JSON tree:"
+            "\n1. DOM SUMMARY — high-level zone/section outline derived from viewport content."
+            "\n2. VIEWPORT HTML — cleaned HTML snippet with detailed child nodes and text previews."
+            "\nCross-check these with the screenshot and prefer visual evidence when there is any mismatch."
+        )
+
+        full_prompt = (
+            self.options.prompt_template
+            + "\n\nCONTEXT GUIDELINES:\n"
+            + guideline
+            + "\n\nDOM SUMMARY (viewport outline):\n"
+            + dom_summary
+            + "\n\nVIEWPORT HTML (cleaned snippet):\n"
+            + html_outline
+        )
+
+        patched_request = dataclasses.replace(request, prompt=full_prompt)
+        return super().generate(patched_request)

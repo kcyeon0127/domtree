@@ -111,7 +111,8 @@ def _hierarchy_positions(graph: nx.DiGraph, root: str, horiz_gap: float = 0.3, v
 
 def _child_offsets(count: int, gap: float) -> list[float]:
     if count == 1:
-        return [0.0]
+        tiny = gap * 0.25 if gap else 0.1
+        return [-tiny, tiny]
     total_span = gap * (count - 1)
     start = -total_span / 2
     return [start + i * gap for i in range(count)]
