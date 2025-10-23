@@ -10,9 +10,9 @@
 - 평가 지표: 트리 편집 거리(TED), 계층 F1, 구조적 유사도, 읽기 순서 정렬(Needleman-Wunsch), 불일치 패턴 분류
 - 배치/리포트: URL 목록 일괄 처리, 요약 통계, CSV/JSON 결과물, 트리 시각화 이미지 출력
 
-## 최근 변경 사항 (2025-10-21)
 - OpenRouter 기반 ChatGPT 4o mini 백엔드를 추가하고 기본 백엔드를 OpenRouter로 전환했습니다. 별도 조치 없이 `domtree analyze` 실행 시 OpenRouter 호출이 먼저 시도됩니다 (`src/domtree/cli.py`).
 - OpenRouter 멀티모달 요청에서 `text`/`image_url` 콘텐츠 타입을 사용하도록 정비해 `"No input provided"` 오류를 방지했습니다 (`src/domtree/llm_tree.py`).
+- DOM 요약 모드는 이제 뷰포트와 겹치는 요소만 남긴 뒤 Human Tree 추출기를 활용해 zone/section/paragraph 계층을 요약합니다. 불필요한 `<div>` 노이즈를 제거한 간결한 구조가 LLM 프롬프트에 전달됩니다 (`src/domtree/llm_tree.py`).
 - LLM 호출 실패 시 `llm_tree.json` → `metadata.notes.llm.debug`에 프롬프트 길이, 이미지 크기, DOM 요약 길이, 응답 상태 코드 등을 기록해 원인 분석이 쉽도록 했습니다 (`src/domtree/llm_tree.py`).
 - Ollama Vision 연동 기본 엔드포인트를 `/api/generate`로 통일해 400 오류를 방지했습니다 (`src/domtree/cli.py`, `README` 예제).
 - README에 Ollama Vision 모델 사용 시 `/api/chat`이 아닌 `/api/generate`를 사용해야 한다는 주석을 추가했습니다.
@@ -270,7 +270,7 @@ domtree batch urls.txt
 - **템플릿 감지 & 교정 프롬프트**: `zone|section|…`, `optional heading` 등 마커가 감지되면 “스키마가 아닌 실제 데이터를 출력하라”는 교정 메시지를 추가해 재시도합니다.
 - **정식 JSON Schema 검증**: `src/domtree/schema.py`에 정의한 `TREE_JSON_SCHEMA`(Draft-07)를 사용해 응답을 검증하고, 스키마 위반 시 구체적인 오류 메시지로 재시도 지침을 전달합니다.
 - **세분화 보장**: 템플릿/스키마 위반이나 JSON 파싱 오류가 감지되면 자동으로 교정 메시지를 추가해 재시도합니다.
-- **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 HTML을 요약한 컨텍스트를 함께 전달하는 LLM도 실행해 구조 정보를 보강합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
+- **Vision + DOM 요약 모드**: 스크린샷 기반 LLM과 별도로, 뷰포트 안에 실제로 노출된 영역을 Human Tree 로직으로 정제해 만든 zone/section 요약을 추가 컨텍스트로 제공합니다(`llm_dom_tree.json`, `comparison_*_dom.png`).
 - **재시도 메타로그**: 최대 시도 횟수(`max_retries`, 기본 3)와 최종 프롬프트 해시, 원문 응답을 `notes.llm`/`attributes.llm`에 기록해 디버깅을 돕습니다.
 - **디버그 스냅샷**: 실패 시 `notes.llm.debug`에 프롬프트 길이·미리보기, 이미지 바이트 수/베이스64 길이, DOM 요약 글자 수, HTTP 상태 코드, `usage` 정보 등을 저장합니다.
 - **최소 노드 수 요구**: Vision LLM은 기본적으로 3개 이상의 노드를 생성해야 하며, 부족할 경우 “세분화” 교정 프롬프트를 받아 다시 시도합니다.

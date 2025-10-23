@@ -586,6 +586,82 @@ class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
         return super().generate(patched_request)
 
     def _summarize_dom(self, html: str) -> str:
+        try:
+            options = HumanTreeOptions(
+                min_text_length=25,
+                restrict_to_viewport=True,
+                include_lists=True,
+                include_tables=True,
+                include_figures=False,
+                include_text_nodes=False,
+                max_list_items=5,
+            )
+            extractor = HumanTreeExtractor(html, options=options)
+            bundle = extractor.extract()
+            summary = self._summarize_zone_tree(bundle.zone_tree)
+        except Exception as exc:  # fallback to simple heading summary
+            logger.debug("Viewport DOM summarisation failed: %s", exc)
+            summary = self._fallback_dom_summary(html)
+
+        max_chars = max(256, self.options.max_dom_chars)
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3] + "..."
+        return summary or "(No visible viewport DOM extracted)"
+
+    def _summarize_zone_tree(self, tree: TreeNode) -> str:
+        lines: list[str] = []
+        section_budget = self.options.max_sections
+
+        for zone in tree.children:
+            if section_budget <= 0:
+                break
+            role = zone.metadata.role or "zone"
+            heading = zone.metadata.text_heading or zone.label
+            bbox = zone.metadata.visual_cues.bbox
+            bbox_text = (
+                f"bbox={bbox}" if bbox and all(v is not None for v in bbox) else "bbox=?"
+            )
+            lines.append(f"ZONE[{zone.metadata.reading_order}] {role}: {heading} ({bbox_text})")
+
+            for child in zone.children:
+                if section_budget <= 0:
+                    break
+                if child.name != "section":
+                    continue
+                section_budget -= 1
+                sec_heading = child.metadata.text_heading or child.label
+                level = child.metadata.heading_level
+                level_txt = f"L{level}" if level else ""
+                lines.append(f"- SECTION{level_txt} [{child.metadata.reading_order}]: {sec_heading}")
+
+                taken = 0
+                for grand in child.children:
+                    if taken >= self.options.paragraphs_per_section:
+                        break
+                    if grand.name not in {"paragraph", "list", "table", "figure"}:
+                        continue
+                    preview = (grand.metadata.text_preview or grand.label or "").strip()
+                    if not preview:
+                        continue
+                    label = grand.name.upper()
+                    lines.append(f"  - {label}: {preview}")
+                    taken += 1
+
+            # If the zone had no sections, fall back to direct content summaries
+            if not any(child.name == "section" for child in zone.children):
+                taken = 0
+                for child in zone.children:
+                    if taken >= self.options.paragraphs_per_section:
+                        break
+                    preview = (child.metadata.text_preview or child.label or "").strip()
+                    if not preview:
+                        continue
+                    lines.append(f"- CONTENT [{child.metadata.reading_order}]: {preview}")
+                    taken += 1
+
+        return "\n".join(lines)
+
+    def _fallback_dom_summary(self, html: str) -> str:
         soup = BeautifulSoup(html, "lxml")
         body = soup.body or soup
         lines: list[str] = []
@@ -612,11 +688,7 @@ class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
                     collected += 1
                 sibling = sibling.find_next_sibling()
 
-        summary = "\n".join(lines)
-        max_chars = max(256, self.options.max_dom_chars)
-        if len(summary) > max_chars:
-            summary = summary[: max_chars - 3] + "..."
-        return summary or "(No visible DOM text extracted)"
+        return "\n".join(lines)
 
 
 # --------------------------- OpenRouter GPT-4o mini backend ---------------------------
