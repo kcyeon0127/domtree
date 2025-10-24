@@ -167,6 +167,7 @@ Field requirements:
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
 - Choose descriptive `name`/`type` values derived from the content (e.g., `zone_main`, `section_introduction`, `paragraph_overview`).
 - Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; do not create new top-level keys like `text` or `content`.
+- Record the evidence used for each node in `metadata.notes.llm.source` (e.g., `"vision"`). When additional instructions are provided later in the prompt, obey those source labels.
 - Example `vis_cues`:
   ```json
   "vis_cues": {{
@@ -214,6 +215,7 @@ Field requirements:
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
 - Choose descriptive `name`/`type` values derived from the HTML semantics (e.g., `zone_main`, `section_introduction`, `paragraph_overview`).
 - Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`.
+- Set `metadata.notes.llm.source` to `"html_only"` for every node.
 - Provide at least 3 nodes. Use a `zone → section → paragraph` pattern as a minimum baseline, and increment `reading_order` globally (1,2,3...).
 - `dom_refs` should reference visible DOM elements or remain an empty array `[]` when unknown.
 
@@ -615,6 +617,8 @@ class OllamaVisionDomLLMTreeGenerator(OllamaVisionLLMTreeGenerator):
             self.options.prompt_template
             + "\n\nDOM SUMMARY (viewport approximation):\n"
             + summary
+            + "\n\nSOURCE GUIDANCE: Nodes supported by this DOM SUMMARY must label `metadata.notes.llm.source` as `dom_summary`."
+            + " If the screenshot also confirms them, combine with `vision` (e.g., `vision+dom_summary`)."
         )
         patched_request = dataclasses.replace(request, prompt=dom_prompt)
         return super().generate(patched_request)
@@ -898,6 +902,7 @@ class OpenRouterVisionDomLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
             self.options.prompt_template
             + "\n\nDOM SUMMARY (viewport approximation):\n"
             + summary
+            + "\n\nSOURCE GUIDANCE: Nodes inferred from this DOM SUMMARY should set metadata.notes.llm.source to \"dom_summary\" (combine with \"vision\" when the screenshot confirms the same node)."
         )
         patched_request = dataclasses.replace(request, prompt=dom_prompt)
         return super().generate(patched_request)
@@ -960,6 +965,7 @@ class OpenRouterVisionHtmlLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
             self.options.prompt_template
             + "\n\nVIEWPORT HTML (cleaned):\n"
             + clean_html
+            + "\n\nSOURCE GUIDANCE: When a node is derived from this HTML outline, set metadata.notes.llm.source to \"html_outline\". Combine with \"vision\" if the screenshot confirms it."
         )
         patched_request = dataclasses.replace(request, prompt=html_prompt)
         return super().generate(patched_request)
@@ -1203,6 +1209,7 @@ class OpenRouterVisionFullLLMTreeGenerator(OpenRouterVisionLLMTreeGenerator):
             "\n1. DOM SUMMARY — high-level zone/section outline derived from viewport content."
             "\n2. VIEWPORT HTML — cleaned HTML snippet with detailed child nodes and text previews."
             "\nCross-check these with the screenshot and prefer visual evidence when there is any mismatch."
+            "\nSet `metadata.notes.llm.source` to reflect which evidence was used: `vision`, `dom_summary`, `html_outline` (combine with `+` when multiple sources support the node)."
         )
 
         full_prompt = (

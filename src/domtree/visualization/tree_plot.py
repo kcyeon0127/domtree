@@ -66,7 +66,9 @@ def _build_graph(node: TreeNode) -> nx.DiGraph:
     graph = nx.DiGraph()
 
     def _add(current: TreeNode):
-        graph.add_node(current.identifier, label=current.label or current.name)
+        graph.add_node(
+            current.identifier, label=current.label or current.name, text_preview=current.metadata.text_preview
+        )
         for child in current.children:
             graph.add_edge(current.identifier, child.identifier)
             _add(child)
@@ -128,6 +130,7 @@ def plot_tree(
     arrows: bool = False,
     font_size: int = 9,
     path: Path | None = None,
+    with_clues: bool = False,
 ) -> None:
     graph = _build_graph(tree)
     pos = _hierarchy_positions(graph, tree.identifier)
@@ -146,6 +149,14 @@ def plot_tree(
     if _FONT_STACK:
         label_kwargs["font_family"] = _FONT_STACK
     nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
+
+    if with_clues:
+        text_previews = nx.get_node_attributes(graph, "text_preview")
+        for node_id, text in text_previews.items():
+            if text:
+                x, y = pos[node_id]
+                ax.text(x, y - 0.2, text, ha="center", va="top", fontsize=font_size - 2, color="grey")
+
     ax.set_title(title)
     ax.axis("off")
     if path:
@@ -162,6 +173,7 @@ def plot_side_by_side(
     node_size: int = 800,
     font_size: int = 9,
     path: Path | None = None,
+    with_clues: bool = False,
 ) -> None:
     graph_left = _build_graph(human_tree)
     graph_right = _build_graph(llm_tree)
@@ -184,6 +196,14 @@ def plot_side_by_side(
         if _FONT_STACK:
             label_kwargs["font_family"] = _FONT_STACK
         nx.draw_networkx_labels(graph, pos, labels, **label_kwargs)
+
+        if with_clues:
+            text_previews = nx.get_node_attributes(graph, "text_preview")
+            for node_id, text in text_previews.items():
+                if text:
+                    x, y = pos[node_id]
+                    ax.text(x, y - 0.2, text, ha="center", va="top", fontsize=font_size - 2, color="grey")
+
         ax.set_title(title)
         ax.axis("off")
     if path:

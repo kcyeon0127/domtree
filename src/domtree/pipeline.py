@@ -463,25 +463,28 @@ class DomTreeAnalyzer:
         zone_html_only_side_by_side_path: Optional[Path] = None,
         heading_html_only_side_by_side_path: Optional[Path] = None,
         llm_html_only_path: Optional[Path] = None,
+        with_clues: bool = False,
     ) -> None:
         if zone_side_by_side_path:
             plot_side_by_side(
                 analysis.zone_comparison.human_tree,
                 analysis.zone_comparison.llm_tree,
                 path=zone_side_by_side_path,
+                with_clues=with_clues,
             )
         if heading_side_by_side_path:
             plot_side_by_side(
                 analysis.heading_comparison.human_tree,
                 analysis.heading_comparison.llm_tree,
                 path=heading_side_by_side_path,
+                with_clues=with_clues,
             )
         if zone_path:
-            plot_tree(analysis.human_zone_tree, title="Human Zone Tree", path=zone_path)
+            plot_tree(analysis.human_zone_tree, title="Human Zone Tree", path=zone_path, with_clues=with_clues)
         if heading_path:
-            plot_tree(analysis.human_heading_tree, title="Human Heading Tree", path=heading_path)
+            plot_tree(analysis.human_heading_tree, title="Human Heading Tree", path=heading_path, with_clues=with_clues)
         if llm_path:
-            plot_tree(analysis.llm_tree, title="LLM Tree (Vision)", path=llm_path)
+            plot_tree(analysis.llm_tree, title="LLM Tree (Vision)", path=llm_path, with_clues=with_clues)
 
         if (
             analysis.zone_dom_comparison
@@ -493,15 +496,17 @@ class DomTreeAnalyzer:
                     analysis.zone_dom_comparison.human_tree,
                     analysis.zone_dom_comparison.llm_tree,
                     path=zone_dom_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if heading_dom_side_by_side_path:
                 plot_side_by_side(
                     analysis.heading_dom_comparison.human_tree,
                     analysis.heading_dom_comparison.llm_tree,
                     path=heading_dom_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if llm_dom_path:
-                plot_tree(analysis.llm_dom_tree, title="LLM Tree (Vision + DOM)", path=llm_dom_path)
+                plot_tree(analysis.llm_dom_tree, title="LLM Tree (Vision + DOM)", path=llm_dom_path, with_clues=with_clues)
 
         if (
             analysis.zone_html_comparison
@@ -513,15 +518,17 @@ class DomTreeAnalyzer:
                     analysis.zone_html_comparison.human_tree,
                     analysis.zone_html_comparison.llm_tree,
                     path=zone_html_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if heading_html_side_by_side_path:
                 plot_side_by_side(
                     analysis.heading_html_comparison.human_tree,
                     analysis.heading_html_comparison.llm_tree,
                     path=heading_html_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if llm_html_path:
-                plot_tree(analysis.llm_html_tree, title="LLM Tree (Vision + HTML)", path=llm_html_path)
+                plot_tree(analysis.llm_html_tree, title="LLM Tree (Vision + HTML)", path=llm_html_path, with_clues=with_clues)
 
         if (
             analysis.zone_html_only_comparison
@@ -533,18 +540,21 @@ class DomTreeAnalyzer:
                     analysis.zone_html_only_comparison.human_tree,
                     analysis.zone_html_only_comparison.llm_tree,
                     path=zone_html_only_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if heading_html_only_side_by_side_path:
                 plot_side_by_side(
                     analysis.heading_html_only_comparison.human_tree,
                     analysis.heading_html_only_comparison.llm_tree,
                     path=heading_html_only_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if llm_html_only_path:
                 plot_tree(
                     analysis.llm_html_only_tree,
                     title="LLM Tree (HTML Only)",
                     path=llm_html_only_path,
+                    with_clues=with_clues,
                 )
 
         if (
@@ -557,16 +567,19 @@ class DomTreeAnalyzer:
                     analysis.zone_full_comparison.human_tree,
                     analysis.zone_full_comparison.llm_tree,
                     path=zone_full_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if heading_full_side_by_side_path:
                 plot_side_by_side(
                     analysis.heading_full_comparison.human_tree,
                     analysis.heading_full_comparison.llm_tree,
                     path=heading_full_side_by_side_path,
+                    with_clues=with_clues,
                 )
             if llm_full_path:
                 plot_tree(
                     analysis.llm_full_tree,
                     title="LLM Tree (Vision + DOM + HTML)",
                     path=llm_full_path,
+                    with_clues=with_clues,
                 )

@@ -226,6 +226,54 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
         shutil.copyfile(zone_human, run_dir / "human.png")
 
 
+def _save_analysis_with_clue(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: Path) -> None:
+    record = result.to_dict()
+    _write_json(run_dir / "result.json", record)
+    (run_dir / "human_zone_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "human_heading_tree.json").write_text(result.human_heading_tree.to_json(indent=2), encoding="utf-8")
+    # Backwards compatibility: keep legacy filename pointing to zone tree
+    (run_dir / "human_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_dom_tree is not None:
+        (run_dir / "llm_dom_tree.json").write_text(result.llm_dom_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_html_tree is not None:
+        (run_dir / "llm_html_tree.json").write_text(result.llm_html_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_full_tree is not None:
+        (run_dir / "llm_full_tree.json").write_text(result.llm_full_tree.to_json(indent=2), encoding="utf-8")
+    if result.llm_html_only_tree is not None:
+        (run_dir / "llm_html_only_tree.json").write_text(result.llm_html_only_tree.to_json(indent=2), encoding="utf-8")
+
+    _write_llm_comparison(result, run_dir)
+    analyzer.visualize(
+        result,
+        zone_side_by_side_path=run_dir / "comparison_zone_clue.png",
+        heading_side_by_side_path=run_dir / "comparison_heading_clue.png",
+        zone_path=run_dir / "human_zone_clue.png",
+        heading_path=run_dir / "human_heading_clue.png",
+        llm_path=run_dir / "llm_clue.png",
+        zone_dom_side_by_side_path=run_dir / "comparison_zone_dom_clue.png",
+        heading_dom_side_by_side_path=run_dir / "comparison_heading_dom_clue.png",
+        llm_dom_path=run_dir / "llm_dom_clue.png",
+        zone_html_side_by_side_path=run_dir / "comparison_zone_html_clue.png",
+        heading_html_side_by_side_path=run_dir / "comparison_heading_html_clue.png",
+        llm_html_path=run_dir / "llm_html_clue.png",
+        zone_full_side_by_side_path=run_dir / "comparison_zone_full_clue.png",
+        heading_full_side_by_side_path=run_dir / "comparison_heading_full_clue.png",
+        llm_full_path=run_dir / "llm_full_clue.png",
+        zone_html_only_side_by_side_path=run_dir / "comparison_zone_html_only_clue.png",
+        heading_html_only_side_by_side_path=run_dir / "comparison_heading_html_only_clue.png",
+        llm_html_only_path=run_dir / "llm_html_only_clue.png",
+        with_clues=True,
+    )
+    # Legacy filenames for downstream compatibility
+    zone_comparison = run_dir / "comparison_zone_clue.png"
+    zone_human = run_dir / "human_zone_clue.png"
+    if zone_comparison.exists():
+        shutil.copyfile(zone_comparison, run_dir / "comparison_clue.png")
+    if zone_human.exists():
+        shutil.copyfile(zone_human, run_dir / "human_clue.png")
+
+
 def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path) -> None:
     result_list = list(results)
     detailed_records = [result.to_dict() for result in result_list]
@@ -315,6 +363,18 @@ def analyze_with_metrics(url: str = typer.Argument(..., help="Target URL")) -> N
     slug = _slugify(url)
     run_dir = _prepare_run_dir("single", slug)
     _save_analysis(analyzer, result, run_dir)
+    _save_component_metrics(result, run_dir)
+
+
+@app.command("analyze-with-clue")
+def analyze_with_clue(url: str = typer.Argument(..., help="Target URL")) -> None:
+    """Run analysis and also export category-level component metrics with clues."""
+
+    analyzer = _create_analyzer()
+    result = analyzer.analyze_url(url)
+    slug = _slugify(url)
+    run_dir = _prepare_run_dir("single", slug)
+    _save_analysis_with_clue(analyzer, result, run_dir)
     _save_component_metrics(result, run_dir)
 
 
