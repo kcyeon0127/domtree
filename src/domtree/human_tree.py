@@ -63,6 +63,7 @@ class HumanTreeOptions:
 class HumanTreeBundle:
     zone_tree: TreeNode
     heading_tree: TreeNode
+    contraction_tree: TreeNode
 
 
 class HumanTreeExtractor:
@@ -92,7 +93,11 @@ class HumanTreeExtractor:
         self._heading_counter = 1
         heading_tree = self._build_heading_tree(body, root_label, title_text)
 
-        return HumanTreeBundle(zone_tree=zone_tree, heading_tree=heading_tree)
+        self._processed.clear()
+        self._heading_counter = 1
+        contraction_tree = self._build_contraction_tree(body, root_label, title_text)
+
+        return HumanTreeBundle(zone_tree=zone_tree, heading_tree=heading_tree, contraction_tree=contraction_tree)
 
     def _build_zone_tree(self, body: Tag, root_label: str, title_text: str) -> TreeNode:
         root_meta = NodeMetadata(
@@ -148,11 +153,101 @@ class HumanTreeExtractor:
             node = TreeNode(name="section", label=label, metadata=metadata)
             while stack and stack[-1][0] >= level:
                 stack.pop()
-            parent = stack[-1][1] if stack else root
-            parent.add_child(node)
-            stack.append((level, node))
-        return root
-
+                    parent = stack[-1][1] if stack else root
+                    parent.add_child(node)
+                    stack.append((level, node))
+                return root
+            
+            def _build_contraction_tree(self, body: Tag, root_label: str, title_text: str) -> TreeNode:
+                """Build a tree based on heading tags and their visual prominence."""
+                heading_label = f"{root_label} (contraction)" if root_label else "contraction"
+                root_meta = NodeMetadata(
+                    node_type="page",
+                    role="contraction_root",
+                    reading_order=0,
+                    text_heading=title_text or None,
+                    language=self._detect_language(),
+                )
+                root = TreeNode(name="page", label=heading_label, metadata=root_meta)
+            
+                headings = []
+                for element in body.find_all(list(HEADING_TAGS) + ["p", "div"]):
+                    prominence = self._get_heading_prominence(element)
+                    if prominence > 0:
+                        headings.append((prominence, element))
+            
+                # Sort by document order, assuming prominence is stable
+                headings.sort(key=lambda x: x[1].sourceline or 0)
+            
+                stack: List[Tuple[float, TreeNode]] = [(float("inf"), root)]
+            
+                for prominence, element in headings:
+                    if not self._is_visible(element):
+                        continue
+            
+                    heading_text = self._normalize_text(element.get_text(" "))
+                    level = int(element.name[1]) if element.name in HEADING_TAGS else None
+            
+                    metadata = NodeMetadata(
+                        node_type="section",
+                        role="section",
+                        text_heading=heading_text[: self.options.heading_text_limit] if heading_text else None,
+                        heading_level=level,
+                        reading_order=self._next_heading_order(),
+                        dom_refs=[self._dom_ref(element)],
+                        visual_cues=self._visual_cues(element),
+                        notes={"prominence_score": prominence},
+                    )
+                    if self.options.restrict_to_viewport and not self._bbox_in_viewport(metadata.visual_cues.bbox):
+                        continue
+            
+                    label = metadata.text_heading or element.name.upper()
+                    node = TreeNode(name="section", label=label, metadata=metadata)
+            
+                    while stack and stack[-1][0] <= prominence:
+                        stack.pop()
+            
+                    parent = stack[-1][1] if stack else root
+                    parent.add_child(node)
+                    stack.append((prominence, node))
+            
+                return root
+            
+            
+            def _get_heading_prominence(self, element: Tag) -> float:
+                """Calculate a prominence score for an element to see if it acts as a heading."""
+                if not isinstance(element, Tag):
+                    return 0
+            
+                score = 0.0
+                tag_name = element.name
+                if tag_name in HEADING_TAGS:
+                    level = int(tag_name[1])
+                    score += (7 - level) * 10  # H1=60, H2=50, ..., H6=10
+            
+                aria_level = element.get("aria-level")
+                if element.get("role") == "heading" and aria_level and aria_level.isdigit():
+                    level = int(aria_level)
+                    score = max(score, (7 - level) * 10)
+            
+                cues = self._visual_cues(element)
+                if cues.font_size:
+                    score += cues.font_size
+            
+                if cues.font_weight:
+                    try:
+                        weight_val = int(cues.font_weight)
+                        if weight_val >= 600:
+                            score += 10
+                    except ValueError:
+                        if cues.font_weight == "bold":
+                            score += 10
+            
+                # Not a heading if it doesn't have a base score from tag/role and is small
+                if score < 10 and not self._normalize_text(element.get_text(" ")):
+                    return 0
+            
+                return score
     # --------------------------- zone detection ----------------------------
 
     def _identify_zones(self, body: Tag) -> Iterable[Tag]:

@@ -184,6 +184,7 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
     _write_json(run_dir / "result.json", record)
     (run_dir / "human_zone_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "human_heading_tree.json").write_text(result.human_heading_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "contraction_tree.json").write_text(result.contraction_tree.to_json(indent=2), encoding="utf-8")
     # Backwards compatibility: keep legacy filename pointing to zone tree
     (run_dir / "human_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
@@ -199,22 +200,28 @@ def _save_analysis(analyzer: DomTreeAnalyzer, result: AnalysisResult, run_dir: P
     _write_llm_comparison(result, run_dir)
     analyzer.visualize(
         result,
-        zone_side_by_side_path=run_dir / "comparison_zone.png",
-        heading_side_by_side_path=run_dir / "comparison_heading.png",
         zone_path=run_dir / "human_zone.png",
         heading_path=run_dir / "human_heading.png",
+        contraction_path=run_dir / "contraction.png",
         llm_path=run_dir / "llm.png",
+        zone_side_by_side_path=run_dir / "comparison_zone.png",
+        heading_side_by_side_path=run_dir / "comparison_heading.png",
+        contraction_side_by_side_path=run_dir / "comparison_contraction.png",
         zone_dom_side_by_side_path=run_dir / "comparison_zone_dom.png",
         heading_dom_side_by_side_path=run_dir / "comparison_heading_dom.png",
+        contraction_dom_side_by_side_path=run_dir / "comparison_contraction_dom.png",
         llm_dom_path=run_dir / "llm_dom.png",
         zone_html_side_by_side_path=run_dir / "comparison_zone_html.png",
         heading_html_side_by_side_path=run_dir / "comparison_heading_html.png",
+        contraction_html_side_by_side_path=run_dir / "comparison_contraction_html.png",
         llm_html_path=run_dir / "llm_html.png",
         zone_full_side_by_side_path=run_dir / "comparison_zone_full.png",
         heading_full_side_by_side_path=run_dir / "comparison_heading_full.png",
+        contraction_full_side_by_side_path=run_dir / "comparison_contraction_full.png",
         llm_full_path=run_dir / "llm_full.png",
         zone_html_only_side_by_side_path=run_dir / "comparison_zone_html_only.png",
         heading_html_only_side_by_side_path=run_dir / "comparison_heading_html_only.png",
+        contraction_html_only_side_by_side_path=run_dir / "comparison_contraction_html_only.png",
         llm_html_only_path=run_dir / "llm_html_only.png",
     )
     # Legacy filenames for downstream compatibility
@@ -231,6 +238,7 @@ def _save_analysis_with_clue(analyzer: DomTreeAnalyzer, result: AnalysisResult, 
     _write_json(run_dir / "result.json", record)
     (run_dir / "human_zone_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "human_heading_tree.json").write_text(result.human_heading_tree.to_json(indent=2), encoding="utf-8")
+    (run_dir / "contraction_tree.json").write_text(result.contraction_tree.to_json(indent=2), encoding="utf-8")
     # Backwards compatibility: keep legacy filename pointing to zone tree
     (run_dir / "human_tree.json").write_text(result.human_zone_tree.to_json(indent=2), encoding="utf-8")
     (run_dir / "llm_tree.json").write_text(result.llm_tree.to_json(indent=2), encoding="utf-8")
@@ -246,22 +254,28 @@ def _save_analysis_with_clue(analyzer: DomTreeAnalyzer, result: AnalysisResult, 
     _write_llm_comparison(result, run_dir)
     analyzer.visualize(
         result,
-        zone_side_by_side_path=run_dir / "comparison_zone_clue.png",
-        heading_side_by_side_path=run_dir / "comparison_heading_clue.png",
         zone_path=run_dir / "human_zone_clue.png",
         heading_path=run_dir / "human_heading_clue.png",
+        contraction_path=run_dir / "contraction_clue.png",
         llm_path=run_dir / "llm_clue.png",
+        zone_side_by_side_path=run_dir / "comparison_zone_clue.png",
+        heading_side_by_side_path=run_dir / "comparison_heading_clue.png",
+        contraction_side_by_side_path=run_dir / "comparison_contraction_clue.png",
         zone_dom_side_by_side_path=run_dir / "comparison_zone_dom_clue.png",
         heading_dom_side_by_side_path=run_dir / "comparison_heading_dom_clue.png",
+        contraction_dom_side_by_side_path=run_dir / "comparison_contraction_dom_clue.png",
         llm_dom_path=run_dir / "llm_dom_clue.png",
         zone_html_side_by_side_path=run_dir / "comparison_zone_html_clue.png",
         heading_html_side_by_side_path=run_dir / "comparison_heading_html_clue.png",
+        contraction_html_side_by_side_path=run_dir / "comparison_contraction_html_clue.png",
         llm_html_path=run_dir / "llm_html_clue.png",
         zone_full_side_by_side_path=run_dir / "comparison_zone_full_clue.png",
         heading_full_side_by_side_path=run_dir / "comparison_heading_full_clue.png",
+        contraction_full_side_by_side_path=run_dir / "comparison_contraction_full_clue.png",
         llm_full_path=run_dir / "llm_full_clue.png",
         zone_html_only_side_by_side_path=run_dir / "comparison_zone_html_only_clue.png",
         heading_html_only_side_by_side_path=run_dir / "comparison_heading_html_only_clue.png",
+        contraction_html_only_side_by_side_path=run_dir / "comparison_contraction_html_only_clue.png",
         llm_html_only_path=run_dir / "llm_html_only_clue.png",
         with_clues=True,
     )
@@ -285,6 +299,7 @@ def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path)
 def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     zone_vis = result.zone_comparison.metrics.flat()
     heading_vis = result.heading_comparison.metrics.flat()
+    contraction_vis = result.contraction_comparison.metrics.flat()
 
     def _delta(candidate: dict, reference: dict) -> dict:
         delta = {}
@@ -297,24 +312,49 @@ def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     comparison = {
         "zone": {"vision": zone_vis},
         "heading": {"vision": heading_vis},
+        "contraction": {"vision": contraction_vis},
     }
 
     variants = [
-        ("dom", result.zone_dom_comparison, result.heading_dom_comparison),
-        ("html", result.zone_html_comparison, result.heading_html_comparison),
-        ("html_only", result.zone_html_only_comparison, result.heading_html_only_comparison),
-        ("full", result.zone_full_comparison, result.heading_full_comparison),
+        (
+            "dom",
+            result.zone_dom_comparison,
+            result.heading_dom_comparison,
+            result.contraction_dom_comparison,
+        ),
+        (
+            "html",
+            result.zone_html_comparison,
+            result.heading_html_comparison,
+            result.contraction_html_comparison,
+        ),
+        (
+            "html_only",
+            result.zone_html_only_comparison,
+            result.heading_html_only_comparison,
+            result.contraction_html_only_comparison,
+        ),
+        (
+            "full",
+            result.zone_full_comparison,
+            result.heading_full_comparison,
+            result.contraction_full_comparison,
+        ),
     ]
 
-    for key, zone_variant, heading_variant in variants:
-        if not (zone_variant and heading_variant):
+    for key, zone_variant, heading_variant, contraction_variant in variants:
+        if not (zone_variant and heading_variant and contraction_variant):
             continue
         zone_metrics = zone_variant.metrics.flat()
         heading_metrics = heading_variant.metrics.flat()
+        contraction_metrics = contraction_variant.metrics.flat()
+
         comparison["zone"][f"vision_{key}"] = zone_metrics
         comparison["zone"][f"delta_{key}"] = _delta(zone_metrics, zone_vis)
         comparison["heading"][f"vision_{key}"] = heading_metrics
         comparison["heading"][f"delta_{key}"] = _delta(heading_metrics, heading_vis)
+        comparison["contraction"][f"vision_{key}"] = contraction_metrics
+        comparison["contraction"][f"delta_{key}"] = _delta(contraction_metrics, contraction_vis)
 
     if len(comparison["zone"]) == 1 and len(comparison["heading"]) == 1:
         return
@@ -333,6 +373,7 @@ def _save_component_metrics(result: AnalysisResult, run_dir: Path) -> None:
     metrics = {
         "human_zone": _metrics_for(result.human_zone_tree),
         "human_heading": _metrics_for(result.human_heading_tree),
+        "human_contraction": _metrics_for(result.contraction_tree),
         "llm_vision": _metrics_for(result.llm_tree),
         "llm_dom": _metrics_for(result.llm_dom_tree),
         "llm_html": _metrics_for(result.llm_html_tree),

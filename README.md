@@ -60,6 +60,8 @@ domtree analyze-with-metrics https://example.com
 
 domtree analyze-with-clue https://ko.wikipedia.org/wiki/%ED%8C%8C%EC%9D%B4%EC%8D%AC
 
+domtree batch /root/domtree/data/links/collected_links_wiki.txt
+
 ### 오프라인 자산 분석
 이미 수집한 `saved_page.html`, `saved_page.png`가 있을 경우:
 ```bash
