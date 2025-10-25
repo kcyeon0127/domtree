@@ -561,7 +561,13 @@ class OllamaVisionLLMTreeGenerator(LLMTreeGenerator):
     @staticmethod
     def _validation_feedback(error: str) -> str:
         return (
-            f"\n\nSYSTEM CORRECTION: The JSON violated the schema ({error}). Every node must include the 'metadata' object and the required fields from the schema. Fix the structure and return JSON only."
+            "\n\n**CRITICAL SYSTEM CORRECTION: YOUR PREVIOUS JSON OUTPUT FAILED SCHEMA VALIDATION.**\n\n"
+            f"**Error:** {error}\n\n"
+            "This is a critical failure. You MUST fix the structure. Pay close attention to the following common mistakes:\n"
+            "- **MANDATORY FIELDS:** Every single node object, at every level, MUST have the keys: `\"name\"`, `\"metadata\"`, and `\"children\"`. The `metadata` object itself MUST have a `\"type\"` key.\n"
+            "- **CORRECT DATA TYPES:** `children` MUST be an array (e.g., `[]`), even if there are no children. `metadata` MUST be an object (`{}`). `heading_level` and `reading_order` must be integers, not strings.\n"
+            "- **NO EXTRA KEYS:** Do not add keys at the top level that are not in the schema (like `\"text\"` or `\"content\"`). All descriptive text goes inside `metadata.text_preview` or `label`.\n\n"
+            "Review the original schema, identify your mistake based on the error message, and provide a corrected, valid JSON object. **DO NOT repeat the mistake. Return only the JSON object.**"
         )
 
     @staticmethod

@@ -44,18 +44,18 @@ class ComparisonMetrics:
 
 @dataclasses.dataclass
 class ComparisonResult:
-    human_tree: TreeNode
-    llm_tree: TreeNode
+    reference_tree: TreeNode
+    compared_tree: TreeNode
     metrics: ComparisonMetrics
 
 
-def compute_comparison(human_tree: TreeNode, llm_tree: TreeNode) -> ComparisonResult:
-    ted = tree_edit_distance(human_tree, llm_tree)
-    normalized_ted = normalized_tree_edit_distance(human_tree, llm_tree)
-    h_f1 = hierarchical_f1(human_tree, llm_tree)
-    structural = structural_similarity(human_tree, llm_tree)
-    reading = reading_order_alignment(human_tree, llm_tree)
-    mismatch = classify_mismatch_patterns(human_tree, llm_tree)
+def compute_comparison(reference_tree: TreeNode, compared_tree: TreeNode) -> ComparisonResult:
+    ted = tree_edit_distance(reference_tree, compared_tree)
+    normalized_ted = normalized_tree_edit_distance(reference_tree, compared_tree)
+    h_f1 = hierarchical_f1(reference_tree, compared_tree)
+    structural = structural_similarity(reference_tree, compared_tree)
+    reading = reading_order_alignment(reference_tree, compared_tree)
+    mismatch = classify_mismatch_patterns(reference_tree, compared_tree)
     metrics = ComparisonMetrics(
         tree_edit_distance=ted,
         normalized_tree_edit_distance=normalized_ted,
@@ -67,4 +67,4 @@ def compute_comparison(human_tree: TreeNode, llm_tree: TreeNode) -> ComparisonRe
         },
         mismatch_patterns=mismatch,
     )
-    return ComparisonResult(human_tree=human_tree, llm_tree=llm_tree, metrics=metrics)
+    return ComparisonResult(reference_tree=reference_tree, compared_tree=compared_tree, metrics=metrics)
