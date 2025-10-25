@@ -145,51 +145,53 @@ class StubLLMTreeGenerator(LLMTreeGenerator):
 # --------------------------- Ollama LLaMA vision backend ---------------------------
 
 DEFAULT_VISION_PROMPT = f"""
-You are a meticulous document analyst. Using ONLY the provided webpage screenshot (ignore HTML) infer the human-perceived layout.
+You are a world-class computer vision expert specializing in UI layout analysis. Your goal is to analyze the provided screenshot and generate a **highly detailed and granular** structural tree in JSON format.
 
-You MUST return ONE valid JSON object that strictly follows the JSON Schema below. Do not include any additional commentary.
+**You MUST follow this two-step process:**
+1.  **Step 1: Think First.** You must first fill out the `internal_thought_process` field. Follow the 'Step-by-Step Thinking Guide' below. This is mandatory.
+2.  **Step 2: Generate Tree.** After, and only after, completing your thought process, use your analysis to generate the tree structure under the `children` field.
 
-JSON Schema (do not modify):
+---
+
+### Step-by-Step Thinking Guide (for `internal_thought_process`)
+
+1.  **Scan for Atomic Elements:** Start with a bottom-up scan. List all the smallest, individual elements you can see (e.g., buttons, text inputs, individual links, icons, labels, small text blocks).
+2.  **Apply Critical Rules:**
+    *   **DO NOT MERGE:** Never merge visually distinct elements into one. If you see 5 links in a menu, list 5 link elements. If you see 3 social media icons, list 3 icon elements. Be specific.
+    *   **BE GRANULAR:** Prefer more detailed nodes over fewer, abstract ones.
+3.  **Group Elements:** Group the identified atomic elements into logical components (e.g., a 'login form' component containing labels, inputs, and a button).
+4.  **Define Zones:** Group the components into major page zones (e.g., `zone_header`, `zone_main`, `zone_footer`).
+5.  **Plan Hierarchy:** Briefly outline the final parent-child hierarchy you will build based on this analysis.
+
+---
+
+### Example
+
+**Example `internal_thought_process`:**
+"1. Atomic elements: I see a 'Username' label, a text input box, a 'Password' label, another text input box, and a 'Login' button.\n2. Rules: I will not merge these. Each will be a separate node.\n3. Grouping: These 5 elements form a 'Login Form'.\n4. Zoning: This form is inside the 'Main Content' zone.\n5. Plan: I will create a `section_login_form` node with 5 children: label, input, label, input, button."
+
+**The resulting `children` array would then be structured based on that plan.**
+
+---
+
+### JSON Schema to Follow
+
+You MUST return ONE valid JSON object that strictly follows the JSON Schema below. Do not include any additional commentary outside the specified fields.
+
+```json
 {SCHEMA_PROMPT_TEXT}
+```
 
-Structural requirements:
-- Create explicit zones for main content, sidebar, navigation, footer, etc. if visible.
-- Within each zone, add sections that correspond to headings or visually distinct blocks.
-- Under each section, include paragraph/list/table/figure nodes for major content blocks. Avoid collapsing multiple paragraphs into one node.
-- Include reading_order for every node in visible order (top-left → bottom-right).
-- When lists or tables are visible, represent them as separate nodes with suitable children if necessary.
-- Limit the tree depth to at most 4 levels by grouping related content as siblings instead of creating single-child chains.
-- Aim to capture at least 10 nodes when the screenshot contains sufficient content.
+### Field Requirements & Rules
 
-Field requirements:
-- Use the exact field names from the schema (snake_case such as `text_heading`, `heading_level`, `reading_order`, `dom_refs`, `vis_cues`, `text_preview`).
+- Use the exact field names from the schema (snake_case such as `text_heading`, `reading_order`, `dom_refs`, `vis_cues`, `text_preview`).
 - If a field has no value, omit it entirely. For arrays use `[]`, for objects use `{{}}`. Never emit `null` for arrays/objects.
 - `dom_refs` must be an array (even if empty). `vis_cues` must be an object with numeric `bbox` when available.
 - Choose descriptive `name`/`type` values derived from the content (e.g., `zone_main`, `section_introduction`, `paragraph_overview`).
-- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`; do not create new top-level keys like `text` or `content`.
-- Record the evidence used for each node in `metadata.notes.llm.source` (e.g., `"vision"`). When additional instructions are provided later in the prompt, obey those source labels.
-- Example `vis_cues`:
-  ```json
-  "vis_cues": {{
-    "bbox": [120, 0, 400, 1024],
-    "font_size": 16,
-    "font_weight": "bold",
-    "margin_top": 12,
-    "margin_bottom": 8
-  }}
-  ```
-- Provide at least 3 nodes. Use a `zone → section → paragraph` pattern as a minimum baseline, and increment `reading_order` globally (1,2,3...).
-- `dom_refs` should reference visible DOM elements or remain an empty array `[]` when unknown.
-
-Rules:
-- Focus only on what is visible in the screenshot. Ignore off-screen DOM sections.
-- Use concrete text snippets from the screenshot (truncate sensibly) or leave fields empty if unreadable.
-- If unsure about text, leave text_preview empty instead of guessing.
-
-Return nothing except the JSON.
-Return a single JSON object without code fences.
-Do NOT output schema examples, placeholders (e.g., "zone|section|..."), or explanatory text.
-Do NOT introduce keys with spaces or hyphens; follow the schema exactly.
+- Every node MUST include a `metadata` object containing at least `type`, `reading_order`, `dom_refs` (array), and `vis_cues` (object). Put text snippets in `metadata.text_preview`.
+- For a visually complex page, aim to capture at least 20-25 nodes. For simpler pages, fewer nodes are acceptable.
+- Tree depth should be appropriate to the content's complexity. Do not sacrifice necessary detail to meet an arbitrary depth limit.
+- Return nothing except the single JSON object. Do NOT use code fences.
 """.strip()
 
 

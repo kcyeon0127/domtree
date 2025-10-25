@@ -10,6 +10,7 @@ src/domtree/human_tree.py
 src/domtree/llm_tree.py
 src/domtree/pipeline.py
 src/domtree/reporting.py
+src/domtree/schema.py
 src/domtree/tree.py
 src/domtree.egg-info/PKG-INFO
 src/domtree.egg-info/SOURCES.txt
@@ -17,6 +18,10 @@ src/domtree.egg-info/dependency_links.txt
 src/domtree.egg-info/entry_points.txt
 src/domtree.egg-info/requires.txt
 src/domtree.egg-info/top_level.txt
+src/domtree/mapping/__init__.py
+src/domtree/mapping/categories.py
+src/domtree/mapping/mapper.py
+src/domtree/mapping/stats.py
 src/domtree/metrics/__init__.py
 src/domtree/metrics/hierarchical_f1.py
 src/domtree/metrics/mismatch.py

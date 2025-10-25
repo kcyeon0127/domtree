@@ -111,6 +111,7 @@ TREE_JSON_SCHEMA: Dict[str, Any] = {
     "required": ["name", "metadata", "children"],
     "properties": {
         "name": {"type": "string", "minLength": 1},
+        "internal_thought_process": {"type": ["string", "null"]},
         "label": {"type": ["string", "null"]},
         "attributes": {"type": "object"},
         "metadata": {

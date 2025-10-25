@@ -58,6 +58,8 @@ domtree analyze-with-metrics https://example.com
 ```
 - 기본 산출물 외에 `component_metrics.json`이 추가되며, 사람/LLM 트리 각각에 대해 PubLayNet·DocLayNet 기반 카테고리별 노드 수·면적 비율이 기록됩니다.
 
+domtree analyze-with-clue https://ko.wikipedia.org/wiki/%ED%8C%8C%EC%9D%B4%EC%8D%AC
+
 ### 오프라인 자산 분석
 이미 수집한 `saved_page.html`, `saved_page.png`가 있을 경우:
 ```bash
