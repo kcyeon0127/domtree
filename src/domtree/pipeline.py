@@ -250,6 +250,17 @@ class DomTreeAnalyzer:
             # ... (and all other variants)
         )
 
+    def run_batch(self, urls: Sequence[str]) -> List[AnalysisResult]:
+        results: List[AnalysisResult] = []
+        for index, url in enumerate(urls, start=1):
+            try:
+                logger.info("[%s/%s] Processing %s", index, len(urls), url)
+                result = self.analyze_url(url)
+                results.append(result)
+            except Exception as exc:  # pragma: no cover - runtime guard
+                logger.exception("Failed to process %s: %s", url, exc)
+        return results
+
     def summarize(self, analyses: Iterable[AnalysisResult]) -> dict:
         analyses = list(analyses)
         # Initialize lists for metrics
