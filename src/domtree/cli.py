@@ -227,6 +227,34 @@ def _write_records_csv(records: Iterable[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False)
 
+
+def _load_run_records(run_dir: Path) -> List[dict]:
+    results_path = run_dir / "results.json"
+    if results_path.exists():
+        data = json.loads(results_path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise typer.BadParameter(f"{results_path} must contain a list of results", param_hint="run_dirs")
+        return data
+
+    items_dir = run_dir / "items"
+    if items_dir.exists():
+        records: List[dict] = []
+        for child in sorted(items_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            record_path = child / "result.json"
+            if not record_path.exists():
+                continue
+            try:
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise typer.BadParameter(f"Invalid JSON in {record_path}: {exc}", param_hint="run_dirs") from exc
+            records.append(record)
+        if records:
+            return records
+
+    raise typer.BadParameter(f"No results found under {run_dir}", param_hint="run_dirs")
+
 def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     zone_vis = result.zone_comparison.metrics.flat()
     heading_vis = result.heading_comparison.metrics.flat()
@@ -382,13 +410,7 @@ def merge_batches(
 
     combined_records: List[dict] = []
     for run_dir in run_dirs:
-        results_path = run_dir / "results.json"
-        if not results_path.exists():
-            raise typer.BadParameter(f"{results_path} not found", param_hint="run_dirs")
-        data = json.loads(results_path.read_text(encoding="utf-8"))
-        if not isinstance(data, list):
-            raise typer.BadParameter(f"{results_path} must contain a list of results", param_hint="run_dirs")
-        combined_records.extend(data)
+        combined_records.extend(_load_run_records(run_dir))
 
     if not combined_records:
         typer.echo("No results found in the provided directories.", err=True)
