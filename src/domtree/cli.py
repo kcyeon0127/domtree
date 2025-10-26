@@ -7,7 +7,7 @@ import shutil
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 import typer
 import logging
@@ -37,6 +37,7 @@ from .pipeline import AnalysisResult, DomTreeAnalyzer
 from .tree import TreeNode
 from .mapping import annotate_tree_with_categories, compute_category_stats
 from .reporting import export_csv
+from .summaries import summarize_records
 
 app = typer.Typer(help="Analyse differences between human-perceived and LLM-derived DOM trees.")
 logging.basicConfig(level=logging.INFO)
@@ -212,6 +213,20 @@ def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path)
     _write_json(run_dir / "results.json", detailed_records)
     export_csv(result_list, run_dir / "results.csv")
 
+
+def _write_records_csv(records: Iterable[dict], path: Path) -> None:
+    try:
+        import pandas as pd
+    except ImportError as exc:  # pragma: no cover - safety guard
+        raise RuntimeError("pandas is required to export CSV data") from exc
+
+    record_list = list(records)
+    if not record_list:
+        return
+    frame = pd.json_normalize(record_list)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False)
+
 def _write_llm_comparison(result: AnalysisResult, run_dir: Path) -> None:
     zone_vis = result.zone_comparison.metrics.flat()
     heading_vis = result.heading_comparison.metrics.flat()
@@ -353,6 +368,42 @@ def batch(
     results = run_batch_from_file(batch_file, analyzer, on_result=_persist_result)
     summary = analyzer.summarize(results)
     _save_batch(results, summary, run_dir)
+
+
+@app.command("merge-batches")
+def merge_batches(
+    run_dirs: List[Path] = typer.Argument(..., exists=True, dir_okay=True, file_okay=False, help="Batch run directories containing results.json"),
+    identifier: Optional[str] = typer.Argument(None, help="Optional identifier for merged outputs"),
+) -> None:
+    """Combine multiple batch run directories into a single merged summary."""
+
+    if len(run_dirs) < 2:
+        raise typer.BadParameter("Provide at least two batch run directories to merge.", param_hint="run_dirs")
+
+    combined_records: List[dict] = []
+    for run_dir in run_dirs:
+        results_path = run_dir / "results.json"
+        if not results_path.exists():
+            raise typer.BadParameter(f"{results_path} not found", param_hint="run_dirs")
+        data = json.loads(results_path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise typer.BadParameter(f"{results_path} must contain a list of results", param_hint="run_dirs")
+        combined_records.extend(data)
+
+    if not combined_records:
+        typer.echo("No results found in the provided directories.", err=True)
+        raise typer.Exit(code=1)
+
+    summary = summarize_records(combined_records)
+    label = identifier or "merged"
+    slug = _slugify(label)
+    run_dir = _prepare_run_dir("batch", slug)
+
+    _write_json(run_dir / "results.json", combined_records)
+    _write_records_csv(combined_records, run_dir / "results.csv")
+    _write_json(run_dir / "summary.json", summary)
+    _write_json(run_dir / "sources.json", [str(path) for path in run_dirs])
+
 
 if __name__ == "__main__":
     app()

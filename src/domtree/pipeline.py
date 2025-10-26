@@ -11,6 +11,7 @@ from .capture import CaptureOptions, capture_page
 from .comparison import ComparisonResult, compute_comparison
 from .human_tree import HumanTreeBundle, HumanTreeExtractor, HumanTreeOptions
 from .llm_tree import HeuristicLLMTreeGenerator, LLMTreeGenerator, LLMTreeRequest
+from .summaries import summarize_records
 from .visualization import plot_side_by_side, plot_tree
 from .tree import TreeNode
 
@@ -269,107 +270,8 @@ class DomTreeAnalyzer:
         return results
 
     def summarize(self, analyses: Iterable[AnalysisResult]) -> dict:
-        analyses = list(analyses)
-        # Initialize lists for metrics
-        zone_metrics, heading_metrics, contraction_metrics = [], [], []
-        zone_dom_metrics, heading_dom_metrics, contraction_dom_metrics = [], [], []
-        zone_html_metrics, heading_html_metrics, contraction_html_metrics = [], [], []
-        zone_html_only_metrics, heading_html_only_metrics, contraction_html_only_metrics = [], [], []
-        zone_full_metrics, heading_full_metrics, contraction_full_metrics = [], [], []
-
-        # Initialize dicts for mismatch totals
-        mismatch_keys = {"missing": 0, "extra": 0, "depth_shift": 0, "order": 0}
-        zone_mismatch, heading_mismatch, contraction_mismatch = mismatch_keys.copy(), mismatch_keys.copy(), mismatch_keys.copy()
-        zone_dom_mismatch, heading_dom_mismatch, contraction_dom_mismatch = mismatch_keys.copy(), mismatch_keys.copy(), mismatch_keys.copy()
-        zone_html_mismatch, heading_html_mismatch, contraction_html_mismatch = mismatch_keys.copy(), mismatch_keys.copy(), mismatch_keys.copy()
-        zone_html_only_mismatch, heading_html_only_mismatch, contraction_html_only_mismatch = mismatch_keys.copy(), mismatch_keys.copy(), mismatch_keys.copy()
-        zone_full_mismatch, heading_full_mismatch, contraction_full_mismatch = mismatch_keys.copy(), mismatch_keys.copy(), mismatch_keys.copy()
-
-        def _accumulate(totals: dict, patterns: dict):
-            totals["missing"] += patterns.get("missing_nodes", {}).get("count", 0)
-            totals["extra"] += patterns.get("extra_nodes", {}).get("count", 0)
-            totals["depth_shift"] += patterns.get("depth_shift", {}).get("count", 0)
-            totals["order"] += patterns.get("reading_order", {}).get("gaps", 0)
-
-        for analysis in analyses:
-            zone_metrics.append(analysis.zone_comparison.metrics.flat())
-            heading_metrics.append(analysis.heading_comparison.metrics.flat())
-            contraction_metrics.append(analysis.contraction_comparison.metrics.flat())
-            _accumulate(zone_mismatch, analysis.zone_comparison.metrics.mismatch_patterns)
-            _accumulate(heading_mismatch, analysis.heading_comparison.metrics.mismatch_patterns)
-            _accumulate(contraction_mismatch, analysis.contraction_comparison.metrics.mismatch_patterns)
-
-            if analysis.contraction_dom_comparison:
-                zone_dom_metrics.append(analysis.zone_dom_comparison.metrics.flat())
-                heading_dom_metrics.append(analysis.heading_dom_comparison.metrics.flat())
-                contraction_dom_metrics.append(analysis.contraction_dom_comparison.metrics.flat())
-                _accumulate(zone_dom_mismatch, analysis.zone_dom_comparison.metrics.mismatch_patterns)
-                _accumulate(heading_dom_mismatch, analysis.heading_dom_comparison.metrics.mismatch_patterns)
-                _accumulate(contraction_dom_mismatch, analysis.contraction_dom_comparison.metrics.mismatch_patterns)
-
-            if analysis.contraction_html_comparison:
-                zone_html_metrics.append(analysis.zone_html_comparison.metrics.flat())
-                heading_html_metrics.append(analysis.heading_html_comparison.metrics.flat())
-                contraction_html_metrics.append(analysis.contraction_html_comparison.metrics.flat())
-                _accumulate(zone_html_mismatch, analysis.zone_html_comparison.metrics.mismatch_patterns)
-                _accumulate(heading_html_mismatch, analysis.heading_html_comparison.metrics.mismatch_patterns)
-                _accumulate(contraction_html_mismatch, analysis.contraction_html_comparison.metrics.mismatch_patterns)
-
-            if analysis.contraction_html_only_comparison:
-                zone_html_only_metrics.append(analysis.zone_html_only_comparison.metrics.flat())
-                heading_html_only_metrics.append(analysis.heading_html_only_comparison.metrics.flat())
-                contraction_html_only_metrics.append(analysis.contraction_html_only_comparison.metrics.flat())
-                _accumulate(zone_html_only_mismatch, analysis.zone_html_only_comparison.metrics.mismatch_patterns)
-                _accumulate(heading_html_only_mismatch, analysis.heading_html_only_comparison.metrics.mismatch_patterns)
-                _accumulate(contraction_html_only_mismatch, analysis.contraction_html_only_comparison.metrics.mismatch_patterns)
-
-            if analysis.contraction_full_comparison:
-                zone_full_metrics.append(analysis.zone_full_comparison.metrics.flat())
-                heading_full_metrics.append(analysis.heading_full_comparison.metrics.flat())
-                contraction_full_metrics.append(analysis.contraction_full_comparison.metrics.flat())
-                _accumulate(zone_full_mismatch, analysis.zone_full_comparison.metrics.mismatch_patterns)
-                _accumulate(heading_full_mismatch, analysis.heading_full_comparison.metrics.mismatch_patterns)
-                _accumulate(contraction_full_mismatch, analysis.contraction_full_comparison.metrics.mismatch_patterns)
-
-        def _average(metrics_list: List[dict]) -> dict:
-            if not metrics_list:
-                return {}
-            keys = metrics_list[0].keys()
-            return {key: sum(m.get(key, 0) for m in metrics_list) / len(metrics_list) for key in keys}
-
-        def _build_summary(metrics: list, mismatches: dict) -> dict:
-            if not metrics:
-                return {}
-            return {
-                "average_metrics": _average(metrics),
-                "mismatch_totals": mismatches,
-                "count": len(metrics),
-            }
-
-        summary = {
-            "zone": _build_summary(zone_metrics, zone_mismatch),
-            "heading": _build_summary(heading_metrics, heading_mismatch),
-            "contraction": _build_summary(contraction_metrics, contraction_mismatch),
-        }
-
-        for key, metrics, mismatches in [
-            ("zone_dom", zone_dom_metrics, zone_dom_mismatch),
-            ("heading_dom", heading_dom_metrics, heading_dom_mismatch),
-            ("contraction_dom", contraction_dom_metrics, contraction_dom_mismatch),
-            ("zone_html", zone_html_metrics, zone_html_mismatch),
-            ("heading_html", heading_html_metrics, heading_html_mismatch),
-            ("contraction_html", contraction_html_metrics, contraction_html_mismatch),
-            ("zone_html_only", zone_html_only_metrics, zone_html_only_mismatch),
-            ("heading_html_only", heading_html_only_metrics, heading_html_only_mismatch),
-            ("contraction_html_only", contraction_html_only_metrics, contraction_html_only_mismatch),
-            ("zone_full", zone_full_metrics, zone_full_mismatch),
-            ("heading_full", heading_full_metrics, heading_full_mismatch),
-            ("contraction_full", contraction_full_metrics, contraction_full_mismatch),
-        ]:
-            if metrics:
-                summary[key] = _build_summary(metrics, mismatches)
-
-        return summary
+        records = [analysis.to_dict() for analysis in analyses]
+        return summarize_records(records)
 
     def visualize(
         self,
