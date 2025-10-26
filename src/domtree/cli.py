@@ -38,6 +38,7 @@ from .mapping import annotate_tree_with_categories, compute_category_stats
 from .reporting import export_csv
 
 app = typer.Typer(help="Analyse differences between human-perceived and LLM-derived DOM trees.")
+logging.basicConfig(level=logging.INFO)
 
 _CAPTURE_SETTINGS = {
     "wait_after_load": 1.0,
