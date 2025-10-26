@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Iterable, List
+from typing import Callable, List
 
 from .pipeline import AnalysisResult, DomTreeAnalyzer
 
@@ -29,6 +29,11 @@ def read_urls(path: Path) -> List[str]:
     raise ValueError(f"Unsupported batch file format: {path.suffix}")
 
 
-def run_batch_from_file(path: Path, analyzer: DomTreeAnalyzer) -> List[AnalysisResult]:
+def run_batch_from_file(
+    path: Path,
+    analyzer: DomTreeAnalyzer,
+    *,
+    on_result: Callable[[AnalysisResult, int], None] | None = None,
+) -> List[AnalysisResult]:
     urls = read_urls(path)
-    return analyzer.run_batch(urls)
+    return analyzer.run_batch(urls, on_result=on_result)

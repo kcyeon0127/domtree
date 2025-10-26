@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import typer
+import logging
 
 from .batch import run_batch_from_file
 from .capture import CaptureOptions
@@ -198,6 +199,12 @@ def _save_analysis_with_clue(analyzer: DomTreeAnalyzer, result: AnalysisResult, 
     shutil.copyfile(run_dir / "comparison_zone_clue.png", run_dir / "comparison_clue.png")
     shutil.copyfile(run_dir / "zone_clue.png", run_dir / "human_clue.png")
 
+def _save_batch_item(analyzer: DomTreeAnalyzer, result: AnalysisResult, batch_dir: Path, index: int) -> None:
+    item_slug = _slugify(result.url)
+    item_dir = batch_dir / f"{index:04d}_{item_slug}"
+    item_dir.mkdir(parents=True, exist_ok=True)
+    _save_analysis(analyzer, result, item_dir)
+
 def _save_batch(results: Iterable[AnalysisResult], summary: dict, run_dir: Path) -> None:
     result_list = list(results)
     detailed_records = [result.to_dict() for result in result_list]
@@ -334,11 +341,17 @@ def batch(
 ) -> None:
     """Run the pipeline on a batch of URLs and persist summary/records."""
     analyzer = _create_analyzer()
-    results = run_batch_from_file(batch_file, analyzer)
-    summary = analyzer.summarize(results)
     label = identifier or batch_file.stem
     slug = _slugify(label)
     run_dir = _prepare_run_dir("batch", slug)
+    items_dir = run_dir / "items"
+    items_dir.mkdir(parents=True, exist_ok=True)
+
+    def _persist_result(result: AnalysisResult, index: int) -> None:
+        _save_batch_item(analyzer, result, items_dir, index)
+
+    results = run_batch_from_file(batch_file, analyzer, on_result=_persist_result)
+    summary = analyzer.summarize(results)
     _save_batch(results, summary, run_dir)
 
 if __name__ == "__main__":

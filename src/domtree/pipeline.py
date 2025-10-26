@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Callable, Iterable, List, Optional, Sequence
 
 from .capture import CaptureOptions, capture_page
 from .comparison import ComparisonResult, compute_comparison
@@ -250,13 +250,20 @@ class DomTreeAnalyzer:
             # ... (and all other variants)
         )
 
-    def run_batch(self, urls: Sequence[str]) -> List[AnalysisResult]:
+    def run_batch(
+        self,
+        urls: Sequence[str],
+        *,
+        on_result: Callable[[AnalysisResult, int], None] | None = None,
+    ) -> List[AnalysisResult]:
         results: List[AnalysisResult] = []
         for index, url in enumerate(urls, start=1):
             try:
                 logger.info("[%s/%s] Processing %s", index, len(urls), url)
                 result = self.analyze_url(url)
                 results.append(result)
+                if on_result:
+                    on_result(result, index)
             except Exception as exc:  # pragma: no cover - runtime guard
                 logger.exception("Failed to process %s: %s", url, exc)
         return results
