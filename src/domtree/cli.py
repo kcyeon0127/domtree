@@ -429,3 +429,21 @@ def merge_batches(
 
 if __name__ == "__main__":
     app()
+
+@app.command("combine-summaries")
+def combine_summaries_cli(
+    summary_files: List[Path] = typer.Argument(..., exists=True, dir_okay=False, help="Paths to summary.json files to combine"),
+    output_name: str = typer.Option("combined_summary", "-o", "--output", help="Name for the output combined summary file"),
+) -> None:
+    """Combines multiple summary.json files into a single aggregated summary."""
+    from .reporting import combine_summaries
+    from .cli import _prepare_run_dir, _write_json
+
+    combined_data = combine_summaries(summary_files)
+    
+    # Create a unique run directory for the combined summary
+    run_dir = _prepare_run_dir("combined_summaries", output_name)
+    output_path = run_dir / f"{output_name}.json"
+    _write_json(output_path, combined_data)
+    
+    typer.echo(f"Combined summary saved to: {output_path}")
